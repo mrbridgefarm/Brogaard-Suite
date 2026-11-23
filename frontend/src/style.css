@@ -232,6 +232,11 @@ html[data-has-wallpaper="true"] .fc .fc-daygrid-body:not(.fc-multimonth-daygrid)
   min-height: calc((100vh - 184px) / 6) !important;
 }
 
+/* Frostet krystalglas-highlight på login-panelet over alle baggrundsbilleder */
+html[data-has-wallpaper="true"] .dav-login-card {
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+}
+
 /* Målrettet 80'er Neon synthwave-accent */
 html[data-theme="neon-80s"] .dav-theme-btn {
   box-shadow: 0 0 16px rgba(225, 29, 145, 0.42);
@@ -242,7 +247,7 @@ html[data-theme="neon-80s"] .dav-theme-btn:hover {
 }
 
 html[data-theme="neon-80s"] .dav-login-card {
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.58), 0 0 0 1px rgba(236, 72, 153, 0.28), 0 0 28px rgba(34, 211, 238, 0.16);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.50), inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 0 0 1px rgba(236, 72, 153, 0.30), 0 0 28px rgba(34, 211, 238, 0.16);
 }
 
 html[data-theme="neon-80s"] .fc {
@@ -266,7 +271,7 @@ html[data-theme="cyberpunk-city"] .dav-theme-btn:hover {
 }
 
 html[data-theme="cyberpunk-city"] .dav-login-card {
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.58), 0 0 0 1px rgba(34, 211, 238, 0.24), 0 0 26px rgba(236, 72, 153, 0.14);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.50), inset 0 1px 0 rgba(255, 255, 255, 0.26), 0 0 0 1px rgba(34, 211, 238, 0.26), 0 0 26px rgba(236, 72, 153, 0.14);
 }
 
 html[data-theme="vice-sunset"] .dav-theme-btn {
@@ -278,7 +283,7 @@ html[data-theme="vice-sunset"] .dav-theme-btn:hover {
 }
 
 html[data-theme="vice-sunset"] .dav-login-card {
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.56), 0 0 0 1px rgba(251, 113, 133, 0.25), 0 0 26px rgba(244, 63, 94, 0.16);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.26), 0 0 0 1px rgba(251, 113, 133, 0.28), 0 0 26px rgba(244, 63, 94, 0.16);
 }
 
 html[data-theme="dark-3d-glass"] .dav-theme-btn {
@@ -290,7 +295,7 @@ html[data-theme="dark-3d-glass"] .dav-theme-btn:hover {
 }
 
 html[data-theme="dark-3d-glass"] .dav-login-card {
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(165, 180, 252, 0.22), 0 0 24px rgba(99, 102, 241, 0.14);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 0 0 1px rgba(165, 180, 252, 0.24), 0 0 24px rgba(99, 102, 241, 0.14);
 }
 
 html[data-theme="retro-supercar"] .dav-theme-btn {
@@ -302,7 +307,7 @@ html[data-theme="retro-supercar"] .dav-theme-btn:hover {
 }
 
 html[data-theme="retro-supercar"] .dav-login-card {
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.60), 0 0 0 1px rgba(248, 113, 113, 0.24), 0 0 24px rgba(34, 211, 238, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.50), inset 0 1px 0 rgba(255, 255, 255, 0.26), 0 0 0 1px rgba(248, 113, 113, 0.26), 0 0 24px rgba(34, 211, 238, 0.12);
 }
 
 html[data-theme="deep-space-3d"] .dav-theme-btn {
@@ -314,7 +319,7 @@ html[data-theme="deep-space-3d"] .dav-theme-btn:hover {
 }
 
 html[data-theme="deep-space-3d"] .dav-login-card {
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.58), 0 0 0 1px rgba(125, 211, 252, 0.20), 0 0 26px rgba(249, 115, 22, 0.14);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 0 0 1px rgba(125, 211, 252, 0.24), 0 0 26px rgba(249, 115, 22, 0.14);
 }
 
 .fc .fc-daygrid-body-natural .fc-daygrid-day-events,

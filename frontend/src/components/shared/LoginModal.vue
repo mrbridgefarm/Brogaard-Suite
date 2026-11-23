@@ -130,97 +130,112 @@ function tryClose() {
         </div>
       </header>
 
-      <!-- Centreret røgfarvet glas-panel -->
+      <!-- Centreret frostet krystalglas-panel -->
       <main class="relative z-10 px-4 py-6 flex items-center justify-center">
         <div
-          class="dav-login-card w-full max-w-[400px] rounded-2xl px-7 py-8 shadow-2xl backdrop-blur-xl border transition-colors duration-300"
+          class="dav-login-card relative overflow-hidden w-full max-w-[400px] rounded-2xl px-7 py-8 shadow-2xl border transition-all duration-300"
+          :class="
+            currentTheme.wallpaper
+              ? 'backdrop-blur-md backdrop-saturate-150 border-white/25'
+              : 'backdrop-blur-xl'
+          "
           :style="{
             background: currentTheme.loginCard,
-            borderColor: currentTheme.border
+            ...(currentTheme.wallpaper ? {} : { borderColor: currentTheme.border })
           }"
         >
-          <div class="text-center">
-            <h1 class="text-2xl font-bold text-white tracking-tight">
-              Velkommen tilbage
-            </h1>
-            <p class="text-xs text-slate-300/80 mt-1">
-              Log ind på Mail, Kalender &amp; Kontakter
-            </p>
-          </div>
-
-          <form class="mt-6 space-y-4 text-xs" @submit.prevent="handleLogin">
-            <div
-              v-if="errorMsg"
-              class="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-200 flex items-start gap-2"
-            >
-              <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{{ errorMsg }}</span>
-            </div>
-
-            <div>
-              <label class="block text-slate-200 font-medium text-[12px] mb-1.5">
-                E-mailadresse
-              </label>
-              <input
-                v-model="username"
-                type="email"
-                required
-                autofocus
-                placeholder="Indtast mailadresse"
-                class="w-full px-3.5 py-2.5 bg-black/30 border border-white/15 rounded-xl text-sm text-white placeholder-slate-400/80 focus:outline-none focus:border-white/40 transition"
-              />
-            </div>
-
-            <!-- Vises kun hvis DEFAULT_MAIL_HOST ikke er konfigureret i .env -->
-            <div v-if="showCustomServerField" class="p-3 rounded-xl bg-black/30 border border-white/10 space-y-1.5">
-              <label class="flex items-center gap-1.5 text-slate-200 font-medium">
-                <Globe class="w-3.5 h-3.5 opacity-80" /> Mailcow Server (IMAP, SMTP &amp; DAV vært)
-              </label>
-              <input
-                v-model="customServerHost"
-                type="text"
-                required
-                placeholder="f.eks. mail.ditdomæne.dk"
-                class="w-full px-3 py-2 bg-black/35 border border-white/15 rounded-xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-white/40"
-              />
-            </div>
-
-            <div>
-              <label class="block text-slate-200 font-medium text-[12px] mb-1.5">
-                Adgangskode
-              </label>
-              <input
-                v-model="password"
-                type="password"
-                required
-                placeholder="••••••••••••••••"
-                class="w-full px-3.5 py-2.5 bg-black/30 border border-white/15 rounded-xl text-sm text-white placeholder-slate-400/80 focus:outline-none focus:border-white/40 transition"
-              />
-            </div>
-
-            <button
-              type="submit"
-              :disabled="suiteStore.isLoggingIn"
-              class="dav-theme-btn w-full py-2.5 rounded-xl font-semibold text-sm shadow-lg transition disabled:opacity-50 mt-2"
-            >
-              {{ suiteStore.isLoggingIn ? 'Logger ind...' : 'Log ind' }}
-            </button>
-          </form>
-
-          <!-- Valgfri genvej til klassisk SOGo hvis SOGO_URL er konfigureret -->
+          <!-- Subtilt lysrefleks / glasglans overlay -->
           <div
-            v-if="suiteStore.sogoUrl"
-            class="mt-5 pt-4 border-t border-white/10 text-center"
-          >
-            <a
-              :href="suiteStore.sogoUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-1.5 text-[11px] text-slate-300/80 hover:text-white transition"
+            v-if="currentTheme.wallpaper"
+            aria-hidden="true"
+            class="pointer-events-none absolute inset-0 rounded-2xl"
+            style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.03) 45%, rgba(255, 255, 255, 0.07) 100%)"
+          ></div>
+
+          <div class="relative z-10">
+            <div class="text-center">
+              <h1 class="text-2xl font-bold text-white tracking-tight drop-shadow">
+                Velkommen tilbage
+              </h1>
+              <p class="text-xs text-slate-200/90 mt-1 drop-shadow-sm">
+                Log ind på Mail, Kalender &amp; Kontakter
+              </p>
+            </div>
+
+            <form class="mt-6 space-y-4 text-xs" @submit.prevent="handleLogin">
+              <div
+                v-if="errorMsg"
+                class="p-3 rounded-xl bg-rose-500/20 backdrop-blur-sm border border-rose-400/40 text-rose-100 flex items-start gap-2"
+              >
+                <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{{ errorMsg }}</span>
+              </div>
+
+              <div>
+                <label class="block text-slate-100 font-medium text-[12px] mb-1.5 drop-shadow-sm">
+                  E-mailadresse
+                </label>
+                <input
+                  v-model="username"
+                  type="email"
+                  required
+                  autofocus
+                  placeholder="Indtast mailadresse"
+                  class="w-full px-3.5 py-2.5 bg-black/20 backdrop-blur-sm border border-white/20 rounded-xl text-sm text-white placeholder-slate-200/70 focus:outline-none focus:bg-black/30 focus:border-white/45 transition"
+                />
+              </div>
+
+              <!-- Vises kun hvis DEFAULT_MAIL_HOST ikke er konfigureret i .env -->
+              <div v-if="showCustomServerField" class="p-3 rounded-xl bg-black/20 backdrop-blur-sm border border-white/15 space-y-1.5">
+                <label class="flex items-center gap-1.5 text-slate-100 font-medium">
+                  <Globe class="w-3.5 h-3.5 opacity-80" /> Mailcow Server (IMAP, SMTP &amp; DAV vært)
+                </label>
+                <input
+                  v-model="customServerHost"
+                  type="text"
+                  required
+                  placeholder="f.eks. mail.ditdomæne.dk"
+                  class="w-full px-3 py-2 bg-black/25 border border-white/20 rounded-xl text-slate-100 placeholder-slate-200/65 focus:outline-none focus:bg-black/35 focus:border-white/45 transition"
+                />
+              </div>
+
+              <div>
+                <label class="block text-slate-100 font-medium text-[12px] mb-1.5 drop-shadow-sm">
+                  Adgangskode
+                </label>
+                <input
+                  v-model="password"
+                  type="password"
+                  required
+                  placeholder="••••••••••••••••"
+                  class="w-full px-3.5 py-2.5 bg-black/20 backdrop-blur-sm border border-white/20 rounded-xl text-sm text-white placeholder-slate-200/70 focus:outline-none focus:bg-black/30 focus:border-white/45 transition"
+                />
+              </div>
+
+              <button
+                type="submit"
+                :disabled="suiteStore.isLoggingIn"
+                class="dav-theme-btn w-full py-2.5 rounded-xl font-semibold text-sm shadow-lg transition disabled:opacity-50 mt-2"
+              >
+                {{ suiteStore.isLoggingIn ? 'Logger ind...' : 'Log ind' }}
+              </button>
+            </form>
+
+            <!-- Valgfri genvej til klassisk SOGo hvis SOGO_URL er konfigureret -->
+            <div
+              v-if="suiteStore.sogoUrl"
+              class="mt-5 pt-4 border-t border-white/15 text-center"
             >
-              <span>Foretrækker du klassisk SOGo? Åbn SOGo</span>
-              <ExternalLink class="w-3 h-3" />
-            </a>
+              <a
+                :href="suiteStore.sogoUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-1.5 text-[11px] text-slate-200/90 hover:text-white transition"
+              >
+                <span>Foretrækker du klassisk SOGo? Åbn SOGo</span>
+                <ExternalLink class="w-3 h-3" />
+              </a>
+            </div>
           </div>
         </div>
       </main>

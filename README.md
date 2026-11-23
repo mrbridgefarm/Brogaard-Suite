@@ -8,8 +8,8 @@
 
 **Brogaard Suite** erstatter behovet for den tunge klassiske SOGo-brugerflade ved at samle alle tre søjler fra Mailcow i én hurtig, sammenhængende og brugervenlig Vue 3 web-applikation — uden en tung server-database:
 
-* **✉️ Mail (`IMAP` / `SMTP` / `ManageSieve`):** Direkte opkobling mod Dovecot/Postfix og port `4190`. Inkluderer smart afsender-alias styring, `Ctrl+C`/`Ctrl+X`/`Ctrl+V` mellem mapper, global søgning i alle mapper, Rich-Text/HTML editor med Smart Dark-Mode kontrast og Rspamd spam/ham-træning.
-* **📅 Kalender (`CalDAV`):** 5 fleksible visninger (**År**, **Måned**, **Uge**, **Dag**, **Liste**), danske ugenumre, Excel-lignende `Ctrl+C`/`Ctrl+X`/`Ctrl+V` på tværs af dage, 1-kliks Danske Helligdage, `.ics`/`webcal://`-abonnementer, mødesikkerhed og offentlige Read-Only delingslinks (`?share=<token>`).
+* **✉️ Mail (`IMAP` / `SMTP` / `ManageSieve`):** Direkte opkobling mod Dovecot/Postfix og port `4190`. Inkluderer automatisk opdagelse af dine Mailcow-aliaser (både via SOGo DAV og valgfri Read-Only `MAILCOW_API_KEY`), `Ctrl+C`/`Ctrl+X`/`Ctrl+V` mellem mapper, global søgning i alle mapper, Rich-Text/HTML editor med Smart Dark-Mode kontrast og Rspamd spam/ham-træning.
+* **📅 Kalender (`CalDAV`):** 5 fleksible visninger (**År**, **Måned**, **Uge**, **Dag**, **Liste**), danske ugenumre, automatisk opdagelse af egne og delte SOGo-kalendere inkl. læse-/skriverettigheder, Excel-lignende `Ctrl+C`/`Ctrl+X`/`Ctrl+V` på tværs af dage, 1-kliks Danske Helligdage, `.ics`/`webcal://`-abonnementer, mødesikkerhed og offentlige Read-Only delingslinks (`?share=<token>`).
 * **👥 Kontakter (`CardDAV`):** Fuld tovejs-synkronisering af dine Mailcow/SOGo-adressebøger (`personal` m.fl. inkl. mobil-kontakter), grupper/tags, instant søgning, fødselsdage og import/eksport af `.vcf` (vCard 3.0).
 
 ---
@@ -18,7 +18,7 @@
 
 Når Mail, Kalender og Kontakter bor under samme tag med ét fælles login, arbejder de direkte sammen:
 
-1. **Én samlet Single Sign-On session:** Log ind én gang med din Mailcow e-mail og adgangskode — øjeblikkelig adgang til både Mail, Kalender og Kontakter. Skift mellem moduler på 0,1 sekund med venstre App-Rail eller `Alt+1`, `Alt+2`, `Alt+3`.
+1. **Én samlet Single Sign-On session:** Log ind én gang med din Mailcow e-mail og adgangskode — øjeblikkelig adgang til både Mail, Kalender og Kontakter. Skift mellem moduler på 0,1 sekund via modulskifteren direkte i toppanelet eller med `Alt+1`, `Alt+2`, `Alt+3`.
 2. **1-Kliks `.ics` Mødeinvitation & Konflikttjek i Mail:** Når du modtager en kalenderinvitation (`.ics`) på e-mail, tjekker suiten øjeblikkeligt din CalDAV-kalender for overlap/konflikter (*"Tidspunktet er ledigt"* eller *"⚠️ Konflikt med ..."*) og lader dig tilføje begivenheden direkte til en valgt kalender med ét klik.
 3. **Auto-Complete på Kontakter:** Når du skriver en e-mail (`Til`, `CC`, `BCC`) eller inviterer deltagere til et kalendermøde, foreslås dine Mailcow CardDAV-kontakter automatisk mens du taster.
 4. **"Gem afsender i kontakter" & "Opret aftale fra e-mail":** Tilføj nye afsendere direkte til din adressebog med ét klik i mailvisningen, eller konvertér en e-mail til en kalenderaftale via værktøjslinjen eller højrekliksmenuen.
@@ -101,7 +101,9 @@ I **Pangolin** kan du pege direkte på **`http://brogaard-suite:3000`**. Se ogs�
 | `DEFAULT_SIEVE_PORT` | `4190` | ManageSieve port |
 | `DEFAULT_CALDAV_URL` | `https://<DEFAULT_MAIL_HOST>/SOGo/dav/` | Valgfri eksplicit CalDAV/CardDAV URL |
 | `APP_MODULES` | `mail,calendar,contacts` | Styrer hvilke moduler der er aktiveret i suiten |
-| `SOGO_URL` | *(tom)* | Valgfrit link til klassisk SOGo (f.eks. `https://mail.ditdomæne.dk/SOGo`), som giver brugere en genvej til frit at vælge mellem Brogaard Suite og SOGo |
+| `SOGO_URL` | *(tom)* | Valgfrit link til klassisk SOGo (f.eks. `https://mail.ditdomæne.dk/SOGo`), som giver brugere en genvej i toppanelet og på login-skærmen |
+| `MAILCOW_API_KEY` | *(tom)* | Valgfri Read-Only Mailcow API-nøgle for også at hente skjulte Mailcow-aliaser og domæne-aliaser (SOGo-synlige aliaser hentes automatisk uden nøgle) |
+| `MAILCOW_API_URL` | `https://<DEFAULT_MAIL_HOST>` | Valgfri eksplicit URL til Mailcow API, hvis denne adskiller sig fra DAV-værten |
 | `ALLOW_INSECURE_TLS` | `false` | Sæt til `true` ved selv-signerede certifikater på lokalt LAN |
 | `SESSION_SECRET` | *(auto-genereret)* | Valgfri fast krypteringsnøgle til session-cookies og delingslinks |
 | `DATA_DIR` | `/app/data` | Persistent mappe til krypteringsnøgle, aliaser, abonnementer og delingslinks |
@@ -112,7 +114,7 @@ I **Pangolin** kan du pege direkte på **`http://brogaard-suite:3000`**. Se ogs�
 
 SOGo skal **fortsat køre** på din Mailcow-server (den leverer CalDAV/CardDAV-protokollerne i baggrunden), så dine brugere bevarer fuld frihed:
 
-1. **I Brogaard Suite (`.env`):** Sæt f.eks. `SOGO_URL=https://mail.ditdomæne.dk/SOGo`. Så vises et diskret **"SOGo"**-link både på loginskærmen og nederst i sidepanelet, hvis nogen vil skifte til klassisk SOGo.
+1. **I Brogaard Suite (`.env`):** Sæt f.eks. `SOGO_URL=https://mail.ditdomæne.dk/SOGo`. Så vises et diskret **"SOGo"**-link både på loginskærmen og øverst til højre i toppanelet, hvis nogen vil skifte til klassisk SOGo.
 2. **I Mailcow UI (`data/web/inc/vars.local.inc.php`):** Tilføj en genvej direkte i Mailcow's brugerpanel, så man kan vælge mellem **Brogaard Suite** og **SOGo**:
 
 ```php

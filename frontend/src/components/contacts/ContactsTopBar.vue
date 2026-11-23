@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {
-  Users,
   Search,
   RefreshCw,
   Wifi,
@@ -16,6 +15,8 @@ import { useContactsStore } from '../../stores/contactsStore';
 import { useSuiteStore } from '../../stores/suiteStore';
 import { useTheme } from '../../composables/useTheme';
 import ThemePicker from '../shared/ThemePicker.vue';
+import SuiteModuleSwitcher from '../shared/SuiteModuleSwitcher.vue';
+import SuiteTopActions from '../shared/SuiteTopActions.vue';
 
 const props = defineProps<{
   sidebarCollapsed: boolean;
@@ -72,8 +73,8 @@ async function handleVcfUpload(e: Event) {
         : undefined
     "
   >
-    <!-- Venstre: Sidebar Toggle & Branding -->
-    <div class="flex items-center gap-3">
+    <!-- Venstre: Sidebar Toggle, Suite Modulskifter & Kontakt-antal -->
+    <div class="flex items-center gap-2.5 shrink-0">
       <button
         type="button"
         class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
@@ -84,31 +85,15 @@ async function handleVcfUpload(e: Event) {
         <PanelLeftClose v-else class="w-4 h-4" />
       </button>
 
-      <div class="flex items-center gap-2.5">
-        <div class="w-9 h-9 rounded-xl border flex items-center justify-center dav-theme-badge transition-colors">
-          <Users class="w-5 h-5" />
-        </div>
-        <div>
-          <div class="font-bold text-slate-100 leading-tight tracking-tight flex items-center gap-2">
-            Brogaard Kontakter
-            <span
-              class="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border transition-colors"
-              :class="suiteStore.isOnline
-                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                : 'bg-amber-500/15 text-amber-300 border-amber-500/30'"
-            >
-              {{ suiteStore.isOnline ? 'Online' : 'Offline' }}
-            </span>
-          </div>
-          <p class="text-[11px] text-slate-400 hidden sm:block">
-            {{ store.contacts.length }} kontakt(er) • CardDAV Sync
-          </p>
-        </div>
-      </div>
+      <SuiteModuleSwitcher />
+
+      <span class="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/25 border border-white/10 text-[11px] text-slate-300 shrink-0">
+        {{ store.contacts.length }} kontakter
+      </span>
     </div>
 
     <!-- Midt: Øjeblikkelig Lokal Kontaktsøgning -->
-    <div class="relative flex-1 max-w-md">
+    <div class="relative flex-1 max-w-md min-w-[150px]">
       <div class="relative flex items-center">
         <Search class="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
         <input
@@ -180,6 +165,8 @@ async function handleVcfUpload(e: Event) {
         <Plus class="w-4 h-4" />
         <span class="hidden sm:inline">Ny kontakt</span>
       </button>
+
+      <SuiteTopActions />
     </div>
   </header>
 </template>

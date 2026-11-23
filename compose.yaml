@@ -21,6 +21,8 @@ services:
       - DEFAULT_CALDAV_URL=${DEFAULT_CALDAV_URL:-}
       - APP_MODULES=${APP_MODULES:-mail,calendar,contacts}
       - SOGO_URL=${SOGO_URL:-}
+      - MAILCOW_API_KEY=${MAILCOW_API_KEY:-}
+      - MAILCOW_API_URL=${MAILCOW_API_URL:-}
       - ALLOW_INSECURE_TLS=${ALLOW_INSECURE_TLS:-false}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - DATA_DIR=/app/data

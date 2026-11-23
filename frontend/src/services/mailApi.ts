@@ -211,6 +211,25 @@ export async function fetchAliasesApi(): Promise<SenderAlias[]> {
   return res.aliases || [];
 }
 
+export async function syncMailcowAliasesApi(): Promise<{
+  aliases: SenderAlias[];
+  discoveredCount: number;
+  sources: { sogoDav: boolean; mailcowApi: boolean };
+}> {
+  const res = await apiRequest<{
+    aliases: SenderAlias[];
+    discoveredCount: number;
+    sources: { sogoDav: boolean; mailcowApi: boolean };
+  }>('/aliases/sync', {
+    method: 'POST'
+  });
+  return {
+    aliases: res.aliases || [],
+    discoveredCount: Number(res.discoveredCount || 0),
+    sources: res.sources || { sogoDav: false, mailcowApi: false }
+  };
+}
+
 export async function upsertAliasApi(params: {
   id?: string;
   email: string;

@@ -218,12 +218,16 @@ export const useCalendarStore = defineStore('calendar', () => {
     isPublicShareMode.value ? [] : calendars.value.filter((c) => !c.readOnly)
   );
 
+  function pickDefaultTargetCalendar(): CalendarSource | undefined {
+    return writableCalendars.value.find((c) => !c.isShared) || writableCalendars.value[0];
+  }
+
   const defaultWritableCalendar = computed<CalendarSource | undefined>(() => {
     if (activeTargetCalendarId.value) {
       const found = writableCalendars.value.find((c) => c.id === activeTargetCalendarId.value);
       if (found) return found;
     }
-    return writableCalendars.value[0];
+    return pickDefaultTargetCalendar();
   });
 
   // Virtuelle fødselsdage fra CardDAV Kontakter
@@ -357,11 +361,11 @@ export const useCalendarStore = defineStore('calendar', () => {
       applyColorOverridesToCalendars(storedCalendars);
       calendars.value = storedCalendars;
       events.value = storedEvents;
-      if (
-        !writableCalendars.value.some((c) => c.id === activeTargetCalendarId.value) &&
-        writableCalendars.value[0]
-      ) {
-        activeTargetCalendarId.value = writableCalendars.value[0].id;
+      if (!writableCalendars.value.some((c) => c.id === activeTargetCalendarId.value)) {
+        const preferred = pickDefaultTargetCalendar();
+        if (preferred) {
+          activeTargetCalendarId.value = preferred.id;
+        }
       }
     }
 
@@ -394,8 +398,11 @@ export const useCalendarStore = defineStore('calendar', () => {
         .map((c) => ({ ...c, visible: true }));
       applyColorOverridesToCalendars(initialCals);
       calendars.value = initialCals;
-      if (!activeTargetCalendarId.value && writableCalendars.value[0]) {
-        activeTargetCalendarId.value = writableCalendars.value[0].id;
+      if (!activeTargetCalendarId.value) {
+        const preferred = pickDefaultTargetCalendar();
+        if (preferred) {
+          activeTargetCalendarId.value = preferred.id;
+        }
       }
     }
 
@@ -542,11 +549,11 @@ export const useCalendarStore = defineStore('calendar', () => {
       events.value = plainEvents;
       lastSyncedAt.value = res.syncedAt;
 
-      if (
-        !writableCalendars.value.some((c) => c.id === activeTargetCalendarId.value) &&
-        writableCalendars.value[0]
-      ) {
-        activeTargetCalendarId.value = writableCalendars.value[0].id;
+      if (!writableCalendars.value.some((c) => c.id === activeTargetCalendarId.value)) {
+        const preferred = pickDefaultTargetCalendar();
+        if (preferred) {
+          activeTargetCalendarId.value = preferred.id;
+        }
       }
 
       if (!silent) {
@@ -1764,7 +1771,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     await db.calendars.delete(calId);
     await db.events.bulkDelete(evIds);
     if (activeTargetCalendarId.value === calId) {
-      activeTargetCalendarId.value = writableCalendars.value[0]?.id || '';
+      activeTargetCalendarId.value = pickDefaultTargetCalendar()?.id || '';
     }
   }
 

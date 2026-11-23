@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { AtSign, Plus, Trash2, Check, X, Star, Pencil } from 'lucide-vue-next';
+import { AtSign, Plus, Trash2, Check, X, Star, Pencil, RefreshCw } from 'lucide-vue-next';
 import { useMailStore } from '../../stores/mailStore';
 import type { SenderAlias } from '../../types/mail';
 
@@ -166,9 +166,25 @@ async function setAsDefault(alias: SenderAlias) {
 
           <!-- Liste over gemte aliaser -->
           <div class="space-y-2">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Gemte Afsender-Aliaser ({{ store.aliases.length }})
-            </h4>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Gemte Afsender-Aliaser ({{ store.aliases.length }})
+              </h4>
+              <button
+                type="button"
+                :disabled="store.isSyncingAliases"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/40 text-sky-300 text-[11px] font-semibold transition disabled:opacity-50"
+                title="Hent automatisk alle aliaser og afsender-rettigheder fra Mailcow / SOGo"
+                @click="store.syncAliasesFromMailcow()"
+              >
+                <RefreshCw class="w-3 h-3" :class="{ 'animate-spin': store.isSyncingAliases }" />
+                <span>{{ store.isSyncingAliases ? 'Synkroniserer...' : 'Synkronisér fra Mailcow' }}</span>
+              </button>
+            </div>
+
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              Mailcow-aliaser markeret som synlige i SOGo hentes automatisk. Tilføj evt. en Read-Only <code class="text-slate-300">MAILCOW_API_KEY</code> i <code class="text-slate-300">.env</code> for også at medtage skjulte aliaser og domæne-aliaser.
+            </p>
 
             <div
               v-for="alias in store.aliases"
@@ -176,7 +192,7 @@ async function setAsDefault(alias: SenderAlias) {
               class="p-3 rounded-xl bg-slate-800/60 border border-slate-700/80 flex items-center justify-between gap-3"
             >
               <div class="min-w-0">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span class="font-bold text-slate-100 truncate">
                     {{ alias.displayName ? `${alias.displayName} <${alias.email}>` : alias.email }}
                   </span>
@@ -185,6 +201,13 @@ async function setAsDefault(alias: SenderAlias) {
                     class="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold"
                   >
                     Standard
+                  </span>
+                  <span
+                    v-if="alias.source === 'mailcow'"
+                    class="px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[10px] font-semibold"
+                    title="Hentet automatisk fra Mailcow"
+                  >
+                    Mailcow
                   </span>
                 </div>
                 <div v-if="alias.signature" class="text-[11px] text-slate-400 truncate mt-0.5">

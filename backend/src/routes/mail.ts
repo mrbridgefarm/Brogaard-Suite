@@ -22,13 +22,18 @@ import {
   upsertAliasForUser,
   deleteAliasForUser
 } from '../services/aliasStore.js';
+import { resolveAliasesWithMailcow } from '../services/mailcowAliases.js';
 import {
   type SieveRuleDTO,
   fetchSieveOverview,
   fetchSpecificSieveScript,
   saveSieveRulesOrScript
 } from '../services/sieveClient.js';
-import { createRateLimiter, requireMailCredentials } from '../services/sessionAuth.js';
+import {
+  createRateLimiter,
+  requireMailCredentials,
+  requireDavCredentials
+} from '../services/sessionAuth.js';
 
 export const mailRouter = Router();
 
@@ -388,13 +393,41 @@ mailRouter.post('/drafts', async (req: Request, res: Response) => {
 /**
  * GET /api/mail/aliases
  */
-mailRouter.get('/aliases', (req: Request, res: Response) => {
+mailRouter.get('/aliases', async (req: Request, res: Response) => {
   try {
     const creds = requireMailCredentials(req);
-    const aliases = getAliasesForUser(creds.username);
+    let aliases = getAliasesForUser(creds.username);
+    try {
+      const davCreds = requireDavCredentials(req);
+      const resolved = await resolveAliasesWithMailcow(davCreds, false);
+      aliases = resolved.aliases;
+    } catch {
+      // Fallback til lokale aliaser hvis DAV ikke svarer
+    }
     res.json({ ok: true, aliases });
   } catch (err: any) {
     res.status(401).json({ ok: false, error: err?.message || 'Ikke logget ind.' });
+  }
+});
+
+/**
+ * POST /api/mail/aliases/sync
+ */
+mailRouter.post('/aliases/sync', async (req: Request, res: Response) => {
+  try {
+    const davCreds = requireDavCredentials(req);
+    const resolved = await resolveAliasesWithMailcow(davCreds, true, true);
+    res.json({
+      ok: true,
+      aliases: resolved.aliases,
+      discoveredCount: resolved.discoveredCount,
+      sources: resolved.sources
+    });
+  } catch (err: any) {
+    res.status(401).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke synkronisere aliaser fra Mailcow.'
+    });
   }
 });
 

@@ -44,9 +44,9 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(71, 118, 173, 0.24)',
     surface: 'rgba(10, 17, 30, 0.72)',
     gridBg: 'rgba(8, 14, 26, 0.76)',
-    loginCard: 'rgba(12, 19, 32, 0.76)',
+    loginCard: 'rgba(12, 19, 32, 0.30)',
     border: 'rgba(255, 255, 255, 0.12)',
-    loginOverlay: 'linear-gradient(180deg, rgba(6, 12, 24, 0.34) 0%, rgba(6, 12, 24, 0.58) 100%)',
+    loginOverlay: 'linear-gradient(180deg, rgba(6, 12, 24, 0.18) 0%, rgba(6, 12, 24, 0.40) 100%)',
     appOverlay: 'rgba(6, 11, 22, 0.42)'
   },
   {
@@ -61,9 +61,9 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(209, 154, 102, 0.22)',
     surface: 'rgba(18, 17, 22, 0.76)',
     gridBg: 'rgba(14, 14, 18, 0.80)',
-    loginCard: 'rgba(20, 19, 24, 0.80)',
+    loginCard: 'rgba(20, 19, 24, 0.32)',
     border: 'rgba(255, 240, 220, 0.13)',
-    loginOverlay: 'linear-gradient(180deg, rgba(12, 11, 16, 0.38) 0%, rgba(12, 11, 16, 0.64) 100%)',
+    loginOverlay: 'linear-gradient(180deg, rgba(12, 11, 16, 0.20) 0%, rgba(12, 11, 16, 0.44) 100%)',
     appOverlay: 'rgba(12, 11, 16, 0.48)'
   },
   {
@@ -78,9 +78,9 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(47, 112, 94, 0.25)',
     surface: 'rgba(11, 19, 17, 0.74)',
     gridBg: 'rgba(8, 15, 14, 0.78)',
-    loginCard: 'rgba(13, 21, 19, 0.78)',
+    loginCard: 'rgba(13, 21, 19, 0.31)',
     border: 'rgba(220, 255, 242, 0.12)',
-    loginOverlay: 'linear-gradient(180deg, rgba(7, 14, 12, 0.32) 0%, rgba(7, 14, 12, 0.60) 100%)',
+    loginOverlay: 'linear-gradient(180deg, rgba(7, 14, 12, 0.18) 0%, rgba(7, 14, 12, 0.42) 100%)',
     appOverlay: 'rgba(7, 14, 12, 0.46)'
   },
   {
@@ -95,9 +95,9 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(45, 116, 130, 0.25)',
     surface: 'rgba(9, 15, 24, 0.74)',
     gridBg: 'rgba(7, 12, 20, 0.78)',
-    loginCard: 'rgba(10, 16, 26, 0.78)',
+    loginCard: 'rgba(10, 16, 26, 0.30)',
     border: 'rgba(210, 245, 255, 0.12)',
-    loginOverlay: 'linear-gradient(180deg, rgba(5, 9, 18, 0.28) 0%, rgba(5, 9, 18, 0.54) 100%)',
+    loginOverlay: 'linear-gradient(180deg, rgba(5, 9, 18, 0.16) 0%, rgba(5, 9, 18, 0.38) 100%)',
     appOverlay: 'rgba(5, 9, 18, 0.42)'
   },
   {
@@ -112,9 +112,9 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(236, 28, 156, 0.22)',
     surface: 'rgba(13, 8, 28, 0.76)',
     gridBg: 'rgba(9, 5, 22, 0.78)',
-    loginCard: 'rgba(14, 8, 30, 0.80)',
+    loginCard: 'rgba(14, 8, 30, 0.34)',
     border: 'rgba(34, 211, 238, 0.28)',
-    loginOverlay: 'linear-gradient(180deg, rgba(8, 3, 22, 0.18) 0%, rgba(8, 3, 22, 0.42) 100%)',
+    loginOverlay: 'linear-gradient(180deg, rgba(8, 3, 22, 0.14) 0%, rgba(8, 3, 22, 0.34) 100%)',
     appOverlay: 'rgba(7, 3, 20, 0.36)'
   },
   {
@@ -129,9 +129,9 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(6, 182, 212, 0.22)',
     surface: 'rgba(8, 15, 26, 0.74)',
     gridBg: 'rgba(6, 12, 22, 0.78)',
-    loginCard: 'rgba(8, 16, 28, 0.80)',
+    loginCard: 'rgba(8, 16, 28, 0.32)',
     border: 'rgba(34, 211, 238, 0.28)',
-    loginOverlay: 'linear-gradient(180deg, rgba(4, 10, 20, 0.24) 0%, rgba(4, 10, 20, 0.56) 100%)',
+    loginOverlay: 'linear-gradient(180deg, rgba(4, 10, 20, 0.16) 0%, rgba(4, 10, 20, 0.40) 100%)',
     appOverlay: 'rgba(4, 10, 20, 0.40)'
   },
   {
@@ -146,9 +146,9 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(244, 63, 94, 0.22)',
     surface: 'rgba(20, 11, 24, 0.76)',
     gridBg: 'rgba(15, 8, 20, 0.80)',
-    loginCard: 'rgba(22, 12, 26, 0.80)',
+    loginCard: 'rgba(22, 12, 26, 0.34)',
     border: 'rgba(251, 113, 133, 0.28)',
-    loginOverlay: 'linear-gradient(180deg, rgba(16, 8, 22, 0.38) 0%, rgba(16, 8, 22, 0.64) 100%)',
+    loginOverlay: 'linear-gradient(180deg, rgba(16, 8, 22, 0.22) 0%, rgba(16, 8, 22, 0.44) 100%)',
     appOverlay: 'rgba(14, 7, 20, 0.48)'
   },
   {
@@ -163,9 +163,9 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(99, 102, 241, 0.24)',
     surface: 'rgba(12, 14, 26, 0.74)',
     gridBg: 'rgba(9, 11, 22, 0.78)',
-    loginCard: 'rgba(14, 16, 30, 0.80)',
+    loginCard: 'rgba(14, 16, 30, 0.30)',
     border: 'rgba(165, 180, 252, 0.20)',
-    loginOverlay: 'linear-gradient(180deg, rgba(8, 10, 22, 0.22) 0%, rgba(8, 10, 22, 0.50) 100%)',
+    loginOverlay: 'linear-gradient(180deg, rgba(8, 10, 22, 0.16) 0%, rgba(8, 10, 22, 0.38) 100%)',
     appOverlay: 'rgba(8, 10, 22, 0.38)'
   },
   {
@@ -180,9 +180,9 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(239, 68, 68, 0.22)',
     surface: 'rgba(10, 14, 18, 0.75)',
     gridBg: 'rgba(7, 10, 14, 0.79)',
-    loginCard: 'rgba(12, 15, 20, 0.80)',
+    loginCard: 'rgba(12, 15, 20, 0.32)',
     border: 'rgba(248, 113, 113, 0.25)',
-    loginOverlay: 'linear-gradient(180deg, rgba(5, 8, 12, 0.24) 0%, rgba(5, 8, 12, 0.54) 100%)',
+    loginOverlay: 'linear-gradient(180deg, rgba(5, 8, 12, 0.16) 0%, rgba(5, 8, 12, 0.40) 100%)',
     appOverlay: 'rgba(5, 8, 12, 0.40)'
   },
   {
@@ -197,9 +197,9 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(249, 115, 22, 0.22)',
     surface: 'rgba(6, 11, 20, 0.74)',
     gridBg: 'rgba(5, 9, 17, 0.78)',
-    loginCard: 'rgba(8, 13, 24, 0.80)',
+    loginCard: 'rgba(8, 13, 24, 0.28)',
     border: 'rgba(125, 211, 252, 0.18)',
-    loginOverlay: 'linear-gradient(180deg, rgba(3, 6, 14, 0.20) 0%, rgba(3, 6, 14, 0.50) 100%)',
+    loginOverlay: 'linear-gradient(180deg, rgba(3, 6, 14, 0.16) 0%, rgba(3, 6, 14, 0.36) 100%)',
     appOverlay: 'rgba(3, 6, 14, 0.36)'
   },
   {
@@ -214,7 +214,7 @@ export const THEMES: AppTheme[] = [
     accentSoft: 'rgba(37, 99, 235, 0.22)',
     surface: 'rgba(15, 23, 42, 0.96)',
     gridBg: 'rgba(2, 6, 23, 0.96)',
-    loginCard: 'rgba(15, 23, 42, 0.96)',
+    loginCard: 'rgba(15, 23, 42, 0.90)',
     border: '#1e293b',
     loginOverlay: 'radial-gradient(circle at 50% 40%, rgba(30, 58, 138, 0.18), rgba(2, 6, 23, 0.98))',
     appOverlay: 'rgba(2, 6, 23, 1)'

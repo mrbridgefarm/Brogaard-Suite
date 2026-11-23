@@ -14,7 +14,8 @@ import {
   Share2,
   ArrowUpDown,
   Rss,
-  Cake
+  Cake,
+  Users
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../../stores/calendarStore';
 import { useContactsStore } from '../../stores/contactsStore';
@@ -341,6 +342,13 @@ function removeSingleClipboardEvent(evId: string) {
                     title="Skrivebeskyttet kalender (Read-Only)"
                   >
                     <Lock class="w-2.5 h-2.5" />
+                  </span>
+                  <span
+                    v-else-if="cal.isShared"
+                    class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[9px] font-semibold shrink-0"
+                    title="Delt kalender (Skrivbar)"
+                  >
+                    <Users class="w-2.5 h-2.5" />
                   </span>
                 </div>
                 <div v-if="cal.isSubscribed || cal.id.startsWith('sub::')" class="text-[10px] text-slate-400 truncate">

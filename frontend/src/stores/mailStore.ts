@@ -30,6 +30,7 @@ import {
   reportSpamStatusApi,
   sendMailApi,
   saveDraftApi,
+  syncMailcowAliasesApi,
   upsertAliasApi,
   deleteAliasApi,
   fetchSieveOverviewApi,
@@ -114,6 +115,7 @@ export const useMailStore = defineStore('mail', () => {
   // Afsender-aliaser
   const aliases = ref<SenderAlias[]>([]);
   const isAliasModalOpen = ref(false);
+  const isSyncingAliases = ref(false);
 
   // Sieve-filterregler
   const isSieveModalOpen = ref(false);
@@ -993,6 +995,38 @@ export const useMailStore = defineStore('mail', () => {
     }
   }
 
+  async function syncAliasesFromMailcow(): Promise<boolean> {
+    if (isSyncingAliases.value) return false;
+    isSyncingAliases.value = true;
+    try {
+      const res = await syncMailcowAliasesApi();
+      syncLocalAliasesCache(username.value, res.aliases);
+      const viaLabel =
+        res.sources.sogoDav && res.sources.mailcowApi
+          ? 'SOGo DAV + Mailcow API'
+          : res.sources.mailcowApi
+            ? 'Mailcow API'
+            : res.sources.sogoDav
+              ? 'Mailcow / SOGo DAV'
+              : 'serveren';
+      notify(
+        'Aliaser synkroniseret',
+        `Fandt ${res.discoveredCount} adresse(r) fra ${viaLabel}. Du har i alt ${res.aliases.length} afsender-alias(er).`,
+        'success'
+      );
+      return true;
+    } catch (err: any) {
+      notify(
+        'Alias-synkronisering fejlede',
+        err?.message || 'Kunne ikke hente aliaser fra Mailcow.',
+        'error'
+      );
+      return false;
+    } finally {
+      isSyncingAliases.value = false;
+    }
+  }
+
   function openComposeModal(
     mode: ComposeMode = 'NEW',
     sourceMsg?: MailDetail | null,
@@ -1228,6 +1262,7 @@ export const useMailStore = defineStore('mail', () => {
     aliases,
     defaultAlias,
     isAliasModalOpen,
+    isSyncingAliases,
     isSieveModalOpen,
     isLoadingSieve,
     sieveOverview,
@@ -1269,6 +1304,7 @@ export const useMailStore = defineStore('mail', () => {
     deleteFolder,
     saveAlias,
     removeAlias,
+    syncAliasesFromMailcow,
     openComposeModal,
     sendMail,
     saveDraft,

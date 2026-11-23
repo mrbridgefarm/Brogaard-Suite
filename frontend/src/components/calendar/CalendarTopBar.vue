@@ -23,6 +23,8 @@ import {
 import { useCalendarStore } from '../../stores/calendarStore';
 import { useTheme } from '../../composables/useTheme';
 import ThemePicker from '../shared/ThemePicker.vue';
+import SuiteModuleSwitcher from '../shared/SuiteModuleSwitcher.vue';
+import SuiteTopActions from '../shared/SuiteTopActions.vue';
 import type { CalendarEvent, CalendarViewType } from '../../types/calendar';
 
 const props = defineProps<{
@@ -100,8 +102,8 @@ function formatShortDateTime(ev: CalendarEvent): string {
         : undefined
     "
   >
-    <!-- Venstre: Sidebar Toggle, Logo & Kalender-navigation -->
-    <div class="flex items-center gap-3">
+    <!-- Venstre: Sidebar Toggle, Suite Modulskifter & Kalender-navigation -->
+    <div class="flex items-center gap-2.5 shrink-0">
       <button
         type="button"
         class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
@@ -112,31 +114,23 @@ function formatShortDateTime(ev: CalendarEvent): string {
         <PanelLeftClose v-else class="w-4 h-4" />
       </button>
 
-      <div class="flex items-center gap-2.5">
+      <SuiteModuleSwitcher v-if="!store.isPublicShareMode" />
+
+      <div v-else class="flex items-center gap-2.5">
         <div class="w-9 h-9 rounded-xl border flex items-center justify-center dav-theme-badge transition-colors">
           <CalendarIcon class="w-5 h-5" />
         </div>
         <div>
           <div class="font-bold text-slate-100 leading-tight tracking-tight flex items-center gap-2">
-            {{ store.isPublicShareMode ? (store.session?.shareLabel || 'Delt Kalender') : 'Brogaard Kalender' }}
+            {{ store.session?.shareLabel || 'Delt Kalender' }}
             <span
-              v-if="store.isPublicShareMode"
               class="inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/30"
             >
               <Lock class="w-2.5 h-2.5" /> Kun visning (Delt link)
             </span>
-            <span
-              v-else
-              class="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border transition-colors"
-              :class="store.isOnline
-                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                : 'bg-amber-500/15 text-amber-300 border-amber-500/30'"
-            >
-              {{ store.isOnline ? 'Online' : 'Offline' }}
-            </span>
           </div>
           <p class="text-[11px] text-slate-400 hidden sm:block">
-            {{ store.isPublicShareMode ? `Delt af ${store.session?.username}` : store.session?.username }}
+            Delt af {{ store.session?.username }}
           </p>
         </div>
       </div>
@@ -147,7 +141,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
       <div class="flex items-center gap-1.5">
         <button
           type="button"
-          class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+          class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
           @click="emit('today')"
         >
           I dag
@@ -170,14 +164,14 @@ function formatShortDateTime(ev: CalendarEvent): string {
             <ChevronRight class="w-4 h-4" />
           </button>
         </div>
-        <h1 class="text-base sm:text-lg font-semibold text-slate-100 capitalize ml-2 min-w-[140px]">
+        <h1 class="text-sm sm:text-base font-semibold text-slate-100 capitalize ml-1.5 truncate max-w-[170px]">
           {{ props.titleText }}
         </h1>
       </div>
     </div>
 
     <!-- Midt: Øjeblikkelig Lokal Søgning -->
-    <div class="relative flex-1 max-w-md">
+    <div class="relative flex-1 max-w-xs xl:max-w-md min-w-[130px]">
       <div class="relative flex items-center">
         <Search class="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
         <input
@@ -258,7 +252,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
     </div>
 
     <!-- Højre -->
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-1.5 shrink-0">
       <button
         v-if="!store.isPublicShareMode"
         type="button"
@@ -268,7 +262,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
         @click="store.triggerUndo()"
       >
         <Undo2 class="w-3.5 h-3.5" />
-        <span class="hidden lg:inline">Fortryd</span>
+        <span class="hidden 2xl:inline">Fortryd</span>
         <span
           v-if="store.undoStack.length > 0"
           class="px-1.5 py-0.2 rounded-full bg-blue-500/30 text-blue-300 text-[10px]"
@@ -284,7 +278,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
       >
         <button
           type="button"
-          class="px-2.5 py-1 rounded-md font-medium transition"
+          class="px-2 py-1 rounded-md font-medium transition"
           :class="store.currentView === 'multiMonthYear' ? 'dav-theme-btn font-semibold' : 'text-slate-300/80 hover:text-white'"
           @click="emit('change-view', 'multiMonthYear')"
         >
@@ -292,7 +286,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
         </button>
         <button
           type="button"
-          class="px-2.5 py-1 rounded-md font-medium transition"
+          class="px-2 py-1 rounded-md font-medium transition"
           :class="store.currentView === 'dayGridMonth' ? 'dav-theme-btn font-semibold' : 'text-slate-300/80 hover:text-white'"
           @click="emit('change-view', 'dayGridMonth')"
         >
@@ -300,7 +294,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
         </button>
         <button
           type="button"
-          class="px-2.5 py-1 rounded-md font-medium transition"
+          class="px-2 py-1 rounded-md font-medium transition"
           :class="store.currentView === 'timeGridWeek' ? 'dav-theme-btn font-semibold' : 'text-slate-300/80 hover:text-white'"
           @click="emit('change-view', 'timeGridWeek')"
         >
@@ -308,7 +302,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
         </button>
         <button
           type="button"
-          class="px-2.5 py-1 rounded-md font-medium transition"
+          class="px-2 py-1 rounded-md font-medium transition"
           :class="store.currentView === 'timeGridDay' ? 'dav-theme-btn font-semibold' : 'text-slate-300/80 hover:text-white'"
           @click="emit('change-view', 'timeGridDay')"
         >
@@ -316,7 +310,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
         </button>
         <button
           type="button"
-          class="px-2.5 py-1 rounded-md font-medium transition"
+          class="px-2 py-1 rounded-md font-medium transition"
           :class="store.currentView === 'listMonth' ? 'dav-theme-btn font-semibold' : 'text-slate-300/80 hover:text-white'"
           @click="emit('change-view', 'listMonth')"
         >
@@ -332,7 +326,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
         @click="store.openShareModal()"
       >
         <Share2 class="w-3.5 h-3.5 text-blue-400" />
-        <span class="hidden xl:inline">Del kalender</span>
+        <span class="hidden 2xl:inline">Del</span>
       </button>
 
       <ThemePicker variant="topbar" />
@@ -426,6 +420,8 @@ function formatShortDateTime(ev: CalendarEvent): string {
         <Plus class="w-4 h-4" />
         <span class="hidden sm:inline">Ny begivenhed</span>
       </button>
+
+      <SuiteTopActions v-if="!store.isPublicShareMode" />
     </div>
   </header>
 </template>

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
-import AppRail from './components/shared/AppRail.vue';
 import LoginModal from './components/shared/LoginModal.vue';
 import MailView from './components/mail/MailView.vue';
 import CalendarView from './components/calendar/CalendarView.vue';
@@ -251,25 +250,21 @@ onUnmounted(() => {
     <!-- Hovedvisning for Brogaard Suite (autentificeret eller offentlig kalender-deling) -->
     <div
       v-else-if="suiteStore.isAuthenticated || suiteStore.isPublicShareMode"
-      class="flex-1 flex min-h-0 overflow-hidden relative z-10"
+      class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden relative z-10"
     >
-      <AppRail v-if="!suiteStore.isPublicShareMode" />
-
-      <div class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-        <MailView
-          v-if="suiteStore.isAnyModuleEnabled('mail') && suiteStore.visitedModules.mail && !suiteStore.isPublicShareMode"
-          v-show="suiteStore.activeModule === 'mail'"
-        />
-        <CalendarView
-          ref="calendarViewRef"
-          v-if="(suiteStore.isAnyModuleEnabled('calendar') || suiteStore.isPublicShareMode) && suiteStore.visitedModules.calendar"
-          v-show="suiteStore.activeModule === 'calendar'"
-        />
-        <ContactsView
-          v-if="suiteStore.isAnyModuleEnabled('contacts') && suiteStore.visitedModules.contacts && !suiteStore.isPublicShareMode"
-          v-show="suiteStore.activeModule === 'contacts'"
-        />
-      </div>
+      <MailView
+        v-if="suiteStore.isAnyModuleEnabled('mail') && suiteStore.visitedModules.mail && !suiteStore.isPublicShareMode"
+        v-show="suiteStore.activeModule === 'mail'"
+      />
+      <CalendarView
+        ref="calendarViewRef"
+        v-if="(suiteStore.isAnyModuleEnabled('calendar') || suiteStore.isPublicShareMode) && suiteStore.visitedModules.calendar"
+        v-show="suiteStore.activeModule === 'calendar'"
+      />
+      <ContactsView
+        v-if="suiteStore.isAnyModuleEnabled('contacts') && suiteStore.visitedModules.contacts && !suiteStore.isPublicShareMode"
+        v-show="suiteStore.activeModule === 'contacts'"
+      />
     </div>
 
     <!-- Globale Modaler -->

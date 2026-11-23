@@ -62,6 +62,7 @@ export interface SenderAlias {
   displayName: string;
   signature: string;
   isDefault: boolean;
+  source?: 'primary' | 'mailcow' | 'manual';
   createdAt: string;
 }
 

@@ -1,7 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import { fetchMailFolders } from '../services/mailClient.js';
-import { fetchCalendars, type CalendarInfoDTO } from '../services/davClient.js';
+import { fetchCalendars, normalizeMailcowUrl, type CalendarInfoDTO } from '../services/davClient.js';
 import { getAliasesForUser } from '../services/aliasStore.js';
+import { resolveAliasesWithMailcow } from '../services/mailcowAliases.js';
 import {
   createRateLimiter,
   getSessionFromCookie,
@@ -38,13 +39,31 @@ authRouter.get('/config', (_req: Request, res: Response) => {
  * GET /api/auth/session
  * Tjekker den krypterede HttpOnly SSO session-cookie.
  */
-authRouter.get('/session', (req: Request, res: Response) => {
+authRouter.get('/session', async (req: Request, res: Response) => {
   const session = getSessionFromCookie(req);
   if (!session) {
     res.json({ ok: true, authenticated: false });
     return;
   }
-  const aliases = getAliasesForUser(session.username);
+
+  let aliases = getAliasesForUser(session.username);
+  try {
+    const davUrl =
+      session.caldavUrl ||
+      normalizeMailcowUrl(process.env.DEFAULT_CALDAV_URL || `https://${session.imapHost}/SOGo/dav/`);
+    const resolved = await resolveAliasesWithMailcow(
+      {
+        serverUrl: davUrl,
+        username: session.username,
+        password: session.password
+      },
+      false
+    );
+    aliases = resolved.aliases;
+  } catch (aliasErr: any) {
+    console.warn('Alias-tjek ved session fejlede:', aliasErr?.message || aliasErr);
+  }
+
   res.json({
     ok: true,
     authenticated: true,
@@ -55,7 +74,7 @@ authRouter.get('/session', (req: Request, res: Response) => {
 
 /**
  * POST /api/auth/login
- * Validerer brugerens login mod Mailcow (IMAP + ikke-blokerende CalDAV discovery)
+ * Validerer brugerens login mod Mailcow (IMAP + ikke-blokerende CalDAV & alias-opdagelse)
  * og sætter én samlet AES-256-GCM HttpOnly SSO-cookie på /api.
  */
 authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
@@ -99,21 +118,33 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
       caldavUrl: serverCfg.caldavUrl
     });
 
-    const aliases = getAliasesForUser(username);
+    const davCreds = {
+      serverUrl: serverCfg.caldavUrl,
+      username,
+      password
+    };
 
-    // Ikke-blokerende CalDAV-tjek, så brugeren altid kommer ind i suiten, selv hvis SOGo DAV er langsom
+    let aliases = getAliasesForUser(username);
     let calendars: CalendarInfoDTO[] = [];
     let caldavReady = false;
-    try {
-      calendars = await fetchCalendars({
-        serverUrl: serverCfg.caldavUrl,
-        username,
-        password
-      });
-      caldavReady = true;
-    } catch (davErr: any) {
-      console.warn('CalDAV forhåndstjek ved login fejlede:', davErr?.message || davErr);
-    }
+
+    await Promise.all([
+      resolveAliasesWithMailcow(davCreds, true)
+        .then((resAliases) => {
+          aliases = resAliases.aliases;
+        })
+        .catch((aliasErr: any) => {
+          console.warn('Mailcow alias-opdagelse ved login fejlede:', aliasErr?.message || aliasErr);
+        }),
+      fetchCalendars(davCreds)
+        .then((fetched) => {
+          calendars = fetched;
+          caldavReady = true;
+        })
+        .catch((davErr: any) => {
+          console.warn('CalDAV forhåndstjek ved login fejlede:', davErr?.message || davErr);
+        })
+    ]);
 
     res.json({
       ok: true,

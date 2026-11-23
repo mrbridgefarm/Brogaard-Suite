@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import {
-  Mail,
   Search,
   Undo2,
   RefreshCw,
@@ -25,6 +24,8 @@ import {
 import { useMailStore, type AutoRefreshMinutes } from '../../stores/mailStore';
 import { useTheme } from '../../composables/useTheme';
 import ThemePicker from '../shared/ThemePicker.vue';
+import SuiteModuleSwitcher from '../shared/SuiteModuleSwitcher.vue';
+import SuiteTopActions from '../shared/SuiteTopActions.vue';
 import type { MailHeader } from '../../types/mail';
 
 const props = defineProps<{
@@ -101,8 +102,8 @@ function toggleLayout() {
         : undefined
     "
   >
-    <!-- Venstre: Sidebar Toggle, Logo & Hurtige Filtre -->
-    <div class="flex items-center gap-3">
+    <!-- Venstre: Sidebar Toggle, Suite Modulskifter & Hurtige Filtre -->
+    <div class="flex items-center gap-2.5 shrink-0">
       <button
         type="button"
         class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
@@ -113,36 +114,13 @@ function toggleLayout() {
         <PanelLeftClose v-else class="w-4 h-4" />
       </button>
 
-      <div class="flex items-center gap-2.5">
-        <div class="w-9 h-9 rounded-xl border flex items-center justify-center dav-theme-badge transition-colors">
-          <Mail class="w-5 h-5" />
-        </div>
-        <div>
-          <div class="font-bold text-slate-100 leading-tight tracking-tight flex items-center gap-2">
-            Brogaard Mail
-            <span
-              class="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border transition-colors"
-              :class="store.isOnline
-                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                : 'bg-amber-500/15 text-amber-300 border-amber-500/30'"
-            >
-              {{ store.isOnline ? 'Online' : 'Offline' }}
-            </span>
-          </div>
-          <p class="text-[11px] text-slate-400 hidden sm:block">
-            {{ store.defaultAlias?.email || store.username }}
-            <span v-if="store.aliases.length > 1" class="text-blue-400">
-              ({{ store.aliases.length }} aliaser)
-            </span>
-          </p>
-        </div>
-      </div>
+      <SuiteModuleSwitcher />
 
-      <div class="h-6 w-px bg-slate-800 hidden md:block"></div>
+      <div class="h-6 w-px bg-slate-800 hidden xl:block"></div>
 
       <!-- Hurtige filtre: Alle / Ulæste / Stjerner / Vedhæftninger -->
       <div
-        class="hidden lg:flex items-center p-0.5 rounded-lg border text-xs transition"
+        class="hidden xl:flex items-center p-0.5 rounded-lg border text-xs transition"
         :class="currentTheme.wallpaper ? 'bg-black/30 border-white/15' : 'bg-slate-950 border-slate-800'"
       >
         <button
@@ -169,7 +147,7 @@ function toggleLayout() {
           @click="store.filterMode = 'FLAGGED'"
         >
           <Star class="w-3 h-3" />
-          <span class="hidden xl:inline">Stjerner</span>
+          <span class="hidden 2xl:inline">Stjerner</span>
         </button>
         <button
           type="button"
@@ -184,7 +162,7 @@ function toggleLayout() {
     </div>
 
     <!-- Midt: Øjeblikkelig Global Søgning i ALLE mapper -->
-    <div class="relative flex-1 max-w-md">
+    <div class="relative flex-1 max-w-sm xl:max-w-md min-w-[140px]">
       <form class="relative flex items-center" @submit.prevent="store.runServerSearch(false)">
         <Search class="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
         <input
@@ -250,8 +228,8 @@ function toggleLayout() {
       </div>
     </div>
 
-    <!-- Højre: Layout-skifter, Sieve-Filtre, Aliaser, Undo, Tema, Hjælp, Sync & Ny e-mail -->
-    <div class="flex items-center gap-1.5 sm:gap-2">
+    <!-- Højre: Layout-skifter, Sieve-Filtre, Aliaser, Undo, Tema, Hjælp, Sync, Ny e-mail & Konto -->
+    <div class="flex items-center gap-1.5 shrink-0">
       <button
         type="button"
         class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
@@ -269,7 +247,7 @@ function toggleLayout() {
         @click="store.openSieveModal()"
       >
         <Filter class="w-3.5 h-3.5 text-purple-400" />
-        <span class="hidden md:inline">Filtre (Sieve)</span>
+        <span class="hidden 2xl:inline">Filtre</span>
       </button>
 
       <button
@@ -279,7 +257,7 @@ function toggleLayout() {
         @click="store.isAliasModalOpen = true"
       >
         <AtSign class="w-3.5 h-3.5 text-blue-400" />
-        <span class="hidden md:inline">Aliaser</span>
+        <span class="hidden 2xl:inline">Aliaser</span>
         <span class="px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-semibold">
           {{ store.aliases.length }}
         </span>
@@ -293,7 +271,7 @@ function toggleLayout() {
         @click="store.triggerUndo()"
       >
         <Undo2 class="w-3.5 h-3.5" />
-        <span class="hidden xl:inline">Fortryd</span>
+        <span class="hidden 2xl:inline">Fortryd</span>
         <span
           v-if="store.undoStack.length > 0"
           class="px-1.5 py-0.2 rounded-full bg-blue-500/30 text-blue-300 text-[10px]"
@@ -445,6 +423,8 @@ function toggleLayout() {
         <Plus class="w-4 h-4" />
         <span class="hidden sm:inline">Ny e-mail</span>
       </button>
+
+      <SuiteTopActions />
     </div>
   </header>
 </template>

@@ -23,6 +23,9 @@ services:
       - APP_MODULES=${APP_MODULES:-mail,calendar,contacts}
       # Valgfrit: Offentligt link til klassisk SOGo så brugere frit kan vælge mellem frontend og SOGo
       - SOGO_URL=${SOGO_URL:-}
+      # Valgfri Read-Only Mailcow API-nøgle for også at hente skjulte/domæne-aliaser automatisk
+      - MAILCOW_API_KEY=${MAILCOW_API_KEY:-}
+      - MAILCOW_API_URL=${MAILCOW_API_URL:-}
       - ALLOW_INSECURE_TLS=${ALLOW_INSECURE_TLS:-false}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - DATA_DIR=/app/data
