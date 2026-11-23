@@ -1,0 +1,414 @@
+<script setup lang="ts">
+import { ref, computed, watch } from 'vue';
+import { X, Users, Plus, Trash2, Save } from 'lucide-vue-next';
+import { useContactsStore } from '../../stores/contactsStore';
+import type { ContactEmail, ContactPhone } from '../../types/contacts';
+
+const store = useContactsStore();
+
+const addressBookId = ref('');
+const firstName = ref('');
+const lastName = ref('');
+const fullName = ref('');
+const nickname = ref('');
+const organization = ref('');
+const title = ref('');
+const emails = ref<ContactEmail[]>([]);
+const phones = ref<ContactPhone[]>([]);
+const birthday = ref('');
+const street = ref('');
+const postalCode = ref('');
+const city = ref('');
+const country = ref('');
+const categoriesText = ref('');
+const website = ref('');
+const notes = ref('');
+
+const isExisting = computed(() => Boolean(store.editingContact?.id));
+
+watch(
+  () => store.editingContact,
+  (c) => {
+    if (!c) return;
+    addressBookId.value = c.addressBookId || store.defaultWritableAddressBook?.id || '';
+    firstName.value = c.firstName || '';
+    lastName.value = c.lastName || '';
+    fullName.value = c.fullName || '';
+    nickname.value = c.nickname || '';
+    organization.value = c.organization || '';
+    title.value = c.title || '';
+    emails.value =
+      c.emails && c.emails.length > 0
+        ? c.emails.map((e) => ({ ...e }))
+        : [{ type: 'home', value: '', pref: true }];
+    phones.value =
+      c.phones && c.phones.length > 0
+        ? c.phones.map((p) => ({ ...p }))
+        : [{ type: 'mobile', value: '', pref: true }];
+    birthday.value = c.birthday || '';
+    street.value = c.address?.street || '';
+    postalCode.value = c.address?.postalCode || '';
+    city.value = c.address?.city || '';
+    country.value = c.address?.country || '';
+    categoriesText.value = (c.categories || []).join(', ');
+    website.value = c.website || '';
+    notes.value = c.notes || '';
+  },
+  { immediate: true }
+);
+
+function addEmailRow() {
+  emails.value.push({ type: 'work', value: '' });
+}
+
+function removeEmailRow(idx: number) {
+  emails.value.splice(idx, 1);
+  if (emails.value.length === 0) {
+    emails.value.push({ type: 'home', value: '' });
+  }
+}
+
+function addPhoneRow() {
+  phones.value.push({ type: 'mobile', value: '' });
+}
+
+function removePhoneRow(idx: number) {
+  phones.value.splice(idx, 1);
+  if (phones.value.length === 0) {
+    phones.value.push({ type: 'mobile', value: '' });
+  }
+}
+
+async function handleSubmit() {
+  const composedFull =
+    fullName.value.trim() ||
+    [firstName.value.trim(), lastName.value.trim()].filter(Boolean).join(' ').trim() ||
+    organization.value.trim() ||
+    emails.value.find((e) => e.value.trim())?.value.trim() ||
+    '';
+
+  if (!composedFull) return;
+
+  const categories = categoriesText.value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  await store.saveContact({
+    id: store.editingContact?.id || '',
+    uid: store.editingContact?.uid || '',
+    addressBookId: addressBookId.value,
+    fullName: composedFull,
+    firstName: firstName.value.trim(),
+    lastName: lastName.value.trim(),
+    nickname: nickname.value.trim() || undefined,
+    organization: organization.value.trim() || undefined,
+    title: title.value.trim() || undefined,
+    emails: emails.value.filter((e) => e.value.trim().length > 0),
+    phones: phones.value.filter((p) => p.value.trim().length > 0),
+    birthday: birthday.value.trim() || undefined,
+    address:
+      street.value.trim() || city.value.trim() || postalCode.value.trim() || country.value.trim()
+        ? {
+            street: street.value.trim(),
+            city: city.value.trim(),
+            postalCode: postalCode.value.trim(),
+            country: country.value.trim()
+          }
+        : undefined,
+    website: website.value.trim() || undefined,
+    notes: notes.value.trim() || undefined,
+    categories,
+    photoDataUrl: store.editingContact?.photoDataUrl,
+    vcardUrl: store.editingContact?.vcardUrl,
+    etag: store.editingContact?.etag,
+    rawVcard: store.editingContact?.rawVcard
+  });
+}
+</script>
+
+<template>
+  <Teleport to="body">
+    <div
+      v-if="store.isContactModalOpen && store.editingContact"
+      class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+      @click.self="store.isContactModalOpen = false"
+    >
+      <div class="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <!-- Header -->
+        <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
+              <Users class="w-4 h-4" />
+            </div>
+            <h3 class="text-base font-bold text-slate-100">
+              {{ isExisting ? 'Redigér kontakt' : 'Opret ny kontakt' }}
+            </h3>
+          </div>
+          <button
+            type="button"
+            class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+            @click="store.isContactModalOpen = false"
+          >
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+
+        <form class="p-5 space-y-4 overflow-y-auto text-xs" @submit.prevent="handleSubmit">
+          <!-- Adressebog (hvis flere skrivbare) -->
+          <div v-if="store.writableAddressBooks.length > 1 && !isExisting">
+            <label class="block text-slate-400 font-medium mb-1">Adressebog</label>
+            <select
+              v-model="addressBookId"
+              class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+            >
+              <option
+                v-for="book in store.writableAddressBooks"
+                :key="book.id"
+                :value="book.id"
+              >
+                {{ book.name }}
+              </option>
+            </select>
+          </div>
+
+          <!-- Navn -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">Fornavn</label>
+              <input
+                v-model="firstName"
+                type="text"
+                placeholder="F.eks. Anna"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">Efternavn</label>
+              <input
+                v-model="lastName"
+                type="text"
+                placeholder="F.eks. Brogaard"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">Visningsnavn</label>
+              <input
+                v-model="fullName"
+                type="text"
+                placeholder="Udfyldes evt. automatisk"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <!-- Firma, Titel, Kaldenavn -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">Firma / Organisation</label>
+              <input
+                v-model="organization"
+                type="text"
+                placeholder="Virksomhed..."
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">Titel / Stilling</label>
+              <input
+                v-model="title"
+                type="text"
+                placeholder="Stilling..."
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">Kaldenavn</label>
+              <input
+                v-model="nickname"
+                type="text"
+                placeholder="Evt. kaldenavn..."
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <!-- E-mails -->
+          <div class="space-y-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-slate-200">E-mailadresser</span>
+              <button
+                type="button"
+                class="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                @click="addEmailRow"
+              >
+                <Plus class="w-3 h-3" /> Tilføj e-mail
+              </button>
+            </div>
+            <div
+              v-for="(em, idx) in emails"
+              :key="idx"
+              class="flex items-center gap-2"
+            >
+              <select
+                v-model="em.type"
+                class="w-28 px-2.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-200"
+              >
+                <option value="home">Privat</option>
+                <option value="work">Arbejde</option>
+                <option value="other">Anden</option>
+              </select>
+              <input
+                v-model="em.value"
+                type="email"
+                placeholder="navn@eksempel.dk"
+                class="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+              <button
+                type="button"
+                class="p-2 text-slate-500 hover:text-rose-400"
+                @click="removeEmailRow(idx)"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Telefonnumre -->
+          <div class="space-y-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-slate-200">Telefonnumre</span>
+              <button
+                type="button"
+                class="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                @click="addPhoneRow"
+              >
+                <Plus class="w-3 h-3" /> Tilføj telefon
+              </button>
+            </div>
+            <div
+              v-for="(ph, idx) in phones"
+              :key="idx"
+              class="flex items-center gap-2"
+            >
+              <select
+                v-model="ph.type"
+                class="w-28 px-2.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-200"
+              >
+                <option value="mobile">Mobil</option>
+                <option value="home">Privat</option>
+                <option value="work">Arbejde</option>
+                <option value="other">Anden</option>
+              </select>
+              <input
+                v-model="ph.value"
+                type="tel"
+                placeholder="+45 12 34 56 78"
+                class="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+              <button
+                type="button"
+                class="p-2 text-slate-500 hover:text-rose-400"
+                @click="removePhoneRow(idx)"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Fødselsdag, Hjemmeside & Grupper -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">Fødselsdag (vises i kalender)</label>
+              <input
+                v-model="birthday"
+                type="date"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+              />
+            </div>
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">Grupper / Tags (komma)</label>
+              <input
+                v-model="categoriesText"
+                type="text"
+                placeholder="Familie, Venner, Arbejde"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+              />
+            </div>
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">Hjemmeside</label>
+              <input
+                v-model="website"
+                type="url"
+                placeholder="https://..."
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+              />
+            </div>
+          </div>
+
+          <!-- Adresse -->
+          <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div class="sm:col-span-2">
+              <label class="block text-slate-400 font-medium mb-1">Gade &amp; husnummer</label>
+              <input
+                v-model="street"
+                type="text"
+                placeholder="Vejnavn 12"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+              />
+            </div>
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">Postnr.</label>
+              <input
+                v-model="postalCode"
+                type="text"
+                placeholder="8000"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+              />
+            </div>
+            <div>
+              <label class="block text-slate-400 font-medium mb-1">By</label>
+              <input
+                v-model="city"
+                type="text"
+                placeholder="Aarhus C"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+              />
+            </div>
+          </div>
+
+          <!-- Noter -->
+          <div>
+            <label class="block text-slate-400 font-medium mb-1">Noter</label>
+            <textarea
+              v-model="notes"
+              rows="2"
+              placeholder="Valgfrie noter..."
+              class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+            ></textarea>
+          </div>
+
+          <!-- Footer -->
+          <div class="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition"
+              @click="store.isContactModalOpen = false"
+            >
+              Annullér
+            </button>
+            <button
+              type="submit"
+              :disabled="store.isSaving"
+              class="px-4 py-2 rounded-xl dav-theme-btn font-semibold flex items-center gap-1.5 shadow transition disabled:opacity-50"
+            >
+              <Save class="w-3.5 h-3.5" />
+              <span>{{ store.isSaving ? 'Gemmer...' : 'Gem kontakt' }}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </Teleport>
+</template>

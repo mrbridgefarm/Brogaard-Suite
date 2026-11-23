@@ -1,0 +1,14 @@
+{
+  "name": "brogaard-suite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Brogaard Suite - Samlet Mailcow Webmail, CalDAV Kalender & CardDAV Kontakter med Single Sign-On og enterprise-sikkerhed",
+  "scripts": {
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build && cd ../backend && npm run build",
+    "docker:up": "docker compose pull && docker compose up -d",
+    "docker:down": "docker compose down"
+  }
+}

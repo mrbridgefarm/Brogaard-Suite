@@ -1,0 +1,309 @@
+<script setup lang="ts">
+import { computed } from 'vue';
+import {
+  Star,
+  Paperclip,
+  Reply,
+  Trash2,
+  MailOpen,
+  Mail,
+  CheckSquare,
+  Square,
+  ShieldAlert,
+  ShieldCheck
+} from 'lucide-vue-next';
+import { useMailStore } from '../../stores/mailStore';
+import { useTheme } from '../../composables/useTheme';
+import type { MailHeader } from '../../types/mail';
+
+const props = defineProps<{
+  width?: number;
+  height?: number;
+  splitMode?: boolean;
+}>();
+
+const store = useMailStore();
+const { currentTheme } = useTheme();
+
+const selectedIdSet = computed(() => new Set(store.selectedMessageIds));
+const clipIdSet = computed(() => new Set(store.clipboard.messages.map((m) => m.id)));
+
+const allSelected = computed(
+  () =>
+    store.filteredMessages.length > 0 &&
+    store.selectedMessageIds.length >= store.filteredMessages.length
+);
+
+function toggleSelectAll() {
+  if (allSelected.value) {
+    store.selectedMessageIds = [];
+  } else {
+    store.selectAllInCurrentList();
+  }
+}
+
+function handleRowClick(e: MouseEvent, msg: MailHeader) {
+  if (e.shiftKey) {
+    store.selectMessageRange(msg);
+  } else if (e.ctrlKey || e.metaKey) {
+    void store.openMessage(msg, true);
+  } else {
+    void store.openMessage(msg, false);
+  }
+}
+
+function handleDragStart(e: DragEvent, msg: MailHeader) {
+  if (!selectedIdSet.value.has(msg.id)) {
+    store.selectedMessageIds = [msg.id];
+  }
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', msg.id);
+  }
+}
+
+function formatPrimaryParty(msg: MailHeader): string {
+  const isSentOrDraft =
+    store.activeFolder?.specialUse === 'sent' ||
+    store.activeFolder?.specialUse === 'drafts';
+  const list = isSentOrDraft ? msg.to : msg.from;
+  const first = list[0];
+  if (!first) return isSentOrDraft ? '(Ingen modtager)' : 'Ukendt afsender';
+  return first.name || first.address;
+}
+
+function formatSecondaryAddress(msg: MailHeader): string {
+  const isSentOrDraft =
+    store.activeFolder?.specialUse === 'sent' ||
+    store.activeFolder?.specialUse === 'drafts';
+  const list = isSentOrDraft ? msg.to : msg.from;
+  const first = list[0];
+  if (!first || !first.name) return '';
+  return first.address;
+}
+
+function formatSmartDate(iso: string): string {
+  const dt = new Date(iso);
+  const now = new Date();
+  const isSameDay =
+    dt.getFullYear() === now.getFullYear() &&
+    dt.getMonth() === now.getMonth() &&
+    dt.getDate() === now.getDate();
+
+  if (isSameDay) {
+    return dt.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' });
+  }
+  const isSameYear = dt.getFullYear() === now.getFullYear();
+  if (isSameYear) {
+    return dt.toLocaleDateString('da-DK', { day: '2-digit', month: 'short' });
+  }
+  return dt.toLocaleDateString('da-DK', { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+</script>
+
+<template>
+  <section
+    class="flex flex-col shrink-0 select-none overflow-hidden transition-all duration-300"
+    :class="[
+      props.splitMode ? 'w-full' : 'h-full',
+      currentTheme.wallpaper
+        ? 'rounded-2xl border backdrop-blur-lg shadow-xl'
+        : props.splitMode
+          ? 'bg-slate-950 border-b border-slate-800'
+          : 'bg-slate-950 border-r border-slate-800'
+    ]"
+    :style="{
+      ...(props.splitMode ? { height: `${props.height || 280}px` } : { width: `${props.width || 380}px` }),
+      ...(currentTheme.wallpaper
+        ? { backgroundColor: currentTheme.gridBg, borderColor: currentTheme.border }
+        : {})
+    }"
+  >
+    <!-- Topbjælke over beskedlisten: Mappe-titel & Batch-handlinger -->
+    <div
+      class="h-11 px-3 border-b flex items-center justify-between gap-2 shrink-0"
+      :class="currentTheme.wallpaper ? 'bg-black/25 border-white/10' : 'bg-slate-900/70 border-slate-800'"
+    >
+      <div class="flex items-center gap-2 min-w-0">
+        <button
+          type="button"
+          class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
+          :title="allSelected ? 'Fravælg alle' : 'Markér alle i listen (Ctrl+A)'"
+          @click="toggleSelectAll"
+        >
+          <CheckSquare v-if="allSelected" class="w-4 h-4 text-blue-400" />
+          <Square v-else class="w-4 h-4" />
+        </button>
+        <h2 class="text-xs font-bold text-slate-100 truncate">
+          {{ store.searchQuery.trim() ? 'Søgeresultater (Alle mapper)' : (store.activeFolder?.name || store.activeFolderPath) }}
+        </h2>
+        <span class="text-[11px] text-slate-400">
+          ({{ store.filteredMessages.length }})
+        </span>
+      </div>
+
+      <!-- Hurtige batch-knapper når 1+ e-mails er markeret -->
+      <div v-if="store.selectedMessageIds.length > 0" class="flex items-center gap-1">
+        <button
+          type="button"
+          class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 transition"
+          title="Skift læst/ulæst"
+          @click="
+            store.toggleSeenForMessages(
+              store.messages.filter((m) => selectedIdSet.has(m.id))
+            )
+          "
+        >
+          <MailOpen class="w-3.5 h-3.5 text-blue-400" />
+        </button>
+        <button
+          type="button"
+          class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 transition"
+          title="Skift stjernemarkering"
+          @click="
+            store.toggleFlaggedForMessages(
+              store.messages.filter((m) => selectedIdSet.has(m.id))
+            )
+          "
+        >
+          <Star class="w-3.5 h-3.5 text-amber-400" />
+        </button>
+        <button
+          type="button"
+          class="p-1.5 rounded-lg hover:bg-orange-500/20 text-slate-300 hover:text-orange-400 transition"
+          :title="store.activeFolder?.specialUse === 'junk'
+            ? 'Markér valgte som Ikke-spam (flyt til Indbakke og træn Rspamd)'
+            : 'Markér valgte som Spam (flyt til Spam-mappen så Rspamd lærer af det)'"
+          @click="
+            store.markMessagesAsSpam(
+              store.messages.filter((m) => selectedIdSet.has(m.id))
+            )
+          "
+        >
+          <ShieldCheck v-if="store.activeFolder?.specialUse === 'junk'" class="w-3.5 h-3.5 text-emerald-400" />
+          <ShieldAlert v-else class="w-3.5 h-3.5 text-orange-400" />
+        </button>
+        <button
+          type="button"
+          class="p-1.5 rounded-lg hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 transition"
+          title="Slet valgte e-mails (Delete)"
+          @click="store.deleteSelectedMessages()"
+        >
+          <Trash2 class="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+
+    <!-- Beskedliste -->
+    <div class="flex-1 overflow-y-auto divide-y divide-slate-800/70">
+      <div
+        v-if="store.filteredMessages.length === 0"
+        class="p-8 text-center text-xs text-slate-400 space-y-2"
+      >
+        <Mail class="w-8 h-8 text-slate-600 mx-auto" />
+        <div class="font-medium text-slate-300">Ingen e-mails i denne visning</div>
+        <p v-if="store.searchQuery" class="text-[11px] text-slate-500">
+          Tryk <kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-slate-300">Enter</kbd> i søgefeltet for at søge dybt på IMAP-serveren.
+        </p>
+      </div>
+
+      <div
+        v-for="msg in store.filteredMessages"
+        :key="msg.id"
+        draggable="true"
+        class="px-3 py-2.5 cursor-pointer transition relative group flex items-start gap-2.5"
+        :class="[
+          store.activeMessageId === msg.id
+            ? 'bg-blue-600/20 border-l-2 border-l-blue-500'
+            : selectedIdSet.has(msg.id)
+              ? 'bg-slate-800/80 border-l-2 border-l-blue-400'
+              : currentTheme.wallpaper
+                ? msg.seen
+                  ? 'bg-transparent hover:bg-white/5'
+                  : 'bg-white/[0.04] hover:bg-white/[0.08]'
+                : msg.seen
+                  ? 'bg-slate-950 hover:bg-slate-900/80'
+                  : 'bg-slate-900/95 hover:bg-slate-800/70',
+          clipIdSet.has(msg.id) && store.clipboard.mode === 'CUT' ? 'opacity-50 outline-dashed outline-1 outline-amber-400' : '',
+          clipIdSet.has(msg.id) && store.clipboard.mode === 'COPY' ? 'outline-dashed outline-1 outline-emerald-400' : ''
+        ]"
+        @click="handleRowClick($event, msg)"
+        @contextmenu.prevent="store.openMessageContextMenu($event, msg)"
+        @dragstart="handleDragStart($event, msg)"
+      >
+        <!-- Ulæst prik & Stjerne -->
+        <div class="flex flex-col items-center gap-1.5 pt-1 shrink-0">
+          <span
+            class="w-2 h-2 rounded-full transition"
+            :class="msg.seen ? 'bg-transparent' : 'bg-blue-500 shadow-sm shadow-blue-500/50'"
+            :title="msg.seen ? 'Læst' : 'Ulæst'"
+          ></span>
+          <button
+            type="button"
+            class="text-slate-500 hover:text-amber-400 transition"
+            title="Stjernemarkér"
+            @click.stop="store.toggleFlaggedForMessages([msg])"
+          >
+            <Star
+              class="w-3.5 h-3.5"
+              :class="msg.flagged ? 'fill-amber-400 text-amber-400' : ''"
+            />
+          </button>
+        </div>
+
+        <!-- Afsender, Emne & Badges -->
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <span
+                class="text-xs truncate"
+                :class="msg.seen ? 'font-medium text-slate-300' : 'font-bold text-white'"
+              >
+                {{ formatPrimaryParty(msg) }}
+              </span>
+              <span
+                v-if="formatSecondaryAddress(msg)"
+                class="text-[10px] text-slate-500 truncate hidden sm:inline"
+              >
+                &lt;{{ formatSecondaryAddress(msg) }}&gt;
+              </span>
+            </div>
+
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span
+                v-if="store.searchQuery.trim() || msg.folder !== store.activeFolderPath"
+                class="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-blue-300 text-[10px] font-semibold"
+                :title="`Mappe: ${store.getFolderDisplayName(msg.folder)}`"
+              >
+                {{ store.getFolderDisplayName(msg.folder) }}
+              </span>
+              <Reply
+                v-if="msg.answered"
+                class="w-3 h-3 text-emerald-400"
+                title="Besvaret"
+              />
+              <Paperclip
+                v-if="msg.hasAttachments"
+                class="w-3 h-3 text-blue-400"
+                title="Har vedhæftede filer"
+              />
+              <span
+                class="text-[11px] whitespace-nowrap"
+                :class="msg.seen ? 'text-slate-500' : 'text-blue-400 font-semibold'"
+              >
+                {{ formatSmartDate(msg.date) }}
+              </span>
+            </div>
+          </div>
+
+          <div
+            class="text-xs mt-0.5 truncate"
+            :class="msg.seen ? 'text-slate-400' : 'font-semibold text-slate-100'"
+          >
+            {{ msg.subject }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>

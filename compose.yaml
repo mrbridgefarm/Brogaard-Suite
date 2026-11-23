@@ -1,0 +1,44 @@
+services:
+  brogaard-suite:
+    image: ghcr.io/mrbridgefarm/brogaard-suite:latest
+    container_name: brogaard-suite
+    restart: unless-stopped
+    expose:
+      - "3000"
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DEFAULT_MAIL_HOST=${DEFAULT_MAIL_HOST:-}
+      - DEFAULT_IMAP_HOST=${DEFAULT_IMAP_HOST:-}
+      - DEFAULT_IMAP_PORT=${DEFAULT_IMAP_PORT:-993}
+      - DEFAULT_IMAP_SECURE=${DEFAULT_IMAP_SECURE:-true}
+      - DEFAULT_SMTP_HOST=${DEFAULT_SMTP_HOST:-}
+      - DEFAULT_SMTP_PORT=${DEFAULT_SMTP_PORT:-465}
+      - DEFAULT_SMTP_SECURE=${DEFAULT_SMTP_SECURE:-true}
+      - DEFAULT_SIEVE_PORT=${DEFAULT_SIEVE_PORT:-4190}
+      - DEFAULT_CALDAV_URL=${DEFAULT_CALDAV_URL:-}
+      - APP_MODULES=${APP_MODULES:-mail,calendar,contacts}
+      - SOGO_URL=${SOGO_URL:-}
+      - ALLOW_INSECURE_TLS=${ALLOW_INSECURE_TLS:-false}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - DATA_DIR=/app/data
+    volumes:
+      - brogaard-suite-data:/app/data
+    networks:
+      - pangolin
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  brogaard-suite-data:
+
+networks:
+  pangolin:
+    name: pangolin
+    external: true

@@ -1,0 +1,624 @@
+<script setup lang="ts">
+import {
+  Lock,
+  RotateCcw,
+  Trash2,
+  Clipboard,
+  Scissors,
+  Bell,
+  ClipboardPaste,
+  X,
+  Clock,
+  Plus,
+  EyeOff,
+  Share2,
+  ArrowUpDown,
+  Rss,
+  Cake
+} from 'lucide-vue-next';
+import { useCalendarStore } from '../../stores/calendarStore';
+import { useContactsStore } from '../../stores/contactsStore';
+import { useTheme } from '../../composables/useTheme';
+import { requestNotificationPermission } from '../../services/notifications';
+import type { CalendarEvent } from '../../types/calendar';
+import { ref } from 'vue';
+
+const props = defineProps<{
+  width: number;
+}>();
+
+const store = useCalendarStore();
+const contactsStore = useContactsStore();
+const notifPermission = ref<string>(
+  typeof window !== 'undefined' && 'Notification' in window
+    ? Notification.permission
+    : 'denied'
+);
+
+const { currentTheme } = useTheme();
+const showNewCalendarForm = ref(false);
+const addCalendarMode = ref<'CALDAV' | 'SUBSCRIBE'>('SUBSCRIBE');
+const newCalendarName = ref('');
+const newCalendarUrl = ref('');
+const newCalendarColor = ref('#7c3aed');
+const isCreatingCalendar = ref(false);
+
+async function submitNewCalendar() {
+  isCreatingCalendar.value = true;
+  try {
+    if (addCalendarMode.value === 'SUBSCRIBE') {
+      const sub = await store.subscribeToCalendar(
+        newCalendarUrl.value,
+        newCalendarName.value || undefined,
+        newCalendarColor.value
+      );
+      if (sub) {
+        newCalendarName.value = '';
+        newCalendarUrl.value = '';
+        showNewCalendarForm.value = false;
+      }
+      return;
+    }
+
+    const created = await store.createCalendar(
+      newCalendarName.value,
+      newCalendarColor.value,
+      newCalendarUrl.value || undefined
+    );
+    if (created) {
+      newCalendarName.value = '';
+      newCalendarUrl.value = '';
+      showNewCalendarForm.value = false;
+    }
+  } finally {
+    isCreatingCalendar.value = false;
+  }
+}
+
+async function quickSubscribeDanishHolidays() {
+  isCreatingCalendar.value = true;
+  try {
+    const sub = await store.subscribeToCalendar(
+      'builtin://dk-holidays',
+      'Danske Helligdage',
+      '#e11d48'
+    );
+    if (sub) {
+      showNewCalendarForm.value = false;
+    }
+  } finally {
+    isCreatingCalendar.value = false;
+  }
+}
+
+async function confirmDeleteCalendar(calId: string, name: string, isSubscribed = false) {
+  const promptText = isSubscribed
+    ? `Vil du afmelde abonnementet på "${name}"?\n\nKalenderen fjernes fra din oversigt.`
+    : `Slet kalenderen "${name}" permanent?\n\nAlle begivenheder i kalenderen slettes også på serveren. Dette kan ikke fortrydes.`;
+  const ok = window.confirm(promptText);
+  if (ok) {
+    await store.deleteCalendar(calId);
+  }
+}
+
+async function enableNotifications() {
+  const perm = await requestNotificationPermission();
+  notifPermission.value = perm;
+  if (perm === 'granted') {
+    store.notify('Browser-notifikationer aktiveret', 'Du får nu OS-påmindelser ved VALARM.', 'success');
+  } else {
+    store.notify('Notifikationer afvist', 'Tillad notifikationer i din browsers adresselinje.', 'warning');
+  }
+}
+
+function handleColorChange(calId: string, event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (input?.value) {
+    void store.setCalendarColorOverride(calId, input.value);
+  }
+}
+
+function formatEventTimeSpan(ev: CalendarEvent): string {
+  const startDt = new Date(ev.start);
+  const datePart = startDt.toLocaleDateString('da-DK', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short'
+  });
+  if (ev.allDay) {
+    return `${datePart} • Heldag`;
+  }
+  const startTime = startDt.toLocaleTimeString('da-DK', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  const endDt = new Date(ev.end || ev.start);
+  const endTime = endDt.toLocaleTimeString('da-DK', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  return `${datePart} • ${startTime} - ${endTime}`;
+}
+
+function removeSingleClipboardEvent(evId: string) {
+  const remaining = store.clipboard.events.filter((e) => e.id !== evId);
+  if (remaining.length === 0) {
+    store.clearClipboard();
+  } else {
+    store.clipboard.events = remaining;
+  }
+}
+</script>
+
+<template>
+  <aside
+    class="flex flex-col justify-between p-3.5 select-none overflow-y-auto shrink-0 h-full transition-all duration-300"
+    :class="
+      currentTheme.wallpaper
+        ? 'rounded-2xl border backdrop-blur-xl shadow-lg'
+        : 'bg-slate-900/90'
+    "
+    :style="{
+      width: `${props.width}px`,
+      ...(currentTheme.wallpaper
+        ? { backgroundColor: currentTheme.surface, borderColor: currentTheme.border }
+        : {})
+    }"
+  >
+    <!-- Top: Kalendere -->
+    <div class="space-y-4">
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400 truncate">
+            {{ store.isPublicShareMode ? 'Delte Kalendere' : 'Kalendere' }}
+          </h2>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <span class="text-[11px] text-slate-500">
+              {{ store.calendars.length }}
+            </span>
+            <button
+              v-if="!store.isPublicShareMode"
+              type="button"
+              class="p-1 rounded-md bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white border border-slate-700 transition"
+              title="Tilføj eller opret ny kalender"
+              @click="showNewCalendarForm = !showNewCalendarForm"
+            >
+              <Plus class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        <form
+          v-if="showNewCalendarForm && !store.isPublicShareMode"
+          class="mb-2.5 p-2.5 rounded-xl bg-slate-950 border border-blue-500/40 space-y-2"
+          @submit.prevent="submitNewCalendar"
+        >
+          <div class="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[10.5px] font-semibold">
+            <button
+              type="button"
+              class="py-1 px-1.5 rounded-md transition truncate"
+              :class="addCalendarMode === 'SUBSCRIBE' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
+              @click="addCalendarMode = 'SUBSCRIBE'"
+            >
+              Abonnér (.ics)
+            </button>
+            <button
+              type="button"
+              class="py-1 px-1.5 rounded-md transition truncate"
+              :class="addCalendarMode === 'CALDAV' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
+              @click="addCalendarMode = 'CALDAV'"
+            >
+              Ny / CalDAV
+            </button>
+          </div>
+
+          <template v-if="addCalendarMode === 'SUBSCRIBE'">
+            <button
+              type="button"
+              :disabled="isCreatingCalendar"
+              class="w-full py-1.5 px-2 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-200 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+              @click="quickSubscribeDanishHolidays"
+            >
+              <svg class="w-4 h-3 rounded-[2px] shrink-0 shadow-sm" viewBox="0 0 28 20" xmlns="http://www.w3.org/2000/svg">
+                <rect width="28" height="20" fill="#c8102e" />
+                <rect x="8" y="0" width="3.5" height="20" fill="#ffffff" />
+                <rect x="0" y="8.25" width="28" height="3.5" fill="#ffffff" />
+              </svg>
+              <span>Tilføj Danske Helligdage (1-klik)</span>
+            </button>
+
+            <div class="text-[10px] text-slate-400 leading-tight pt-0.5">
+              Eller indsæt iCal / <code class="text-slate-300">.ics</code> / <code class="text-slate-300">webcal://</code> link fra Google, Microsoft Outlook eller Apple iCloud:
+            </div>
+
+            <div>
+              <input
+                v-model="newCalendarUrl"
+                type="text"
+                placeholder="https://... eller webcal://... (.ics)"
+                class="w-full px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div class="flex items-center gap-2">
+              <input
+                v-model="newCalendarName"
+                type="text"
+                placeholder="Valgfrit navn (hentes ellers automatisk)..."
+                class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+              <input
+                v-model="newCalendarColor"
+                type="color"
+                class="w-7 h-7 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
+                title="Vælg farve"
+              />
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="flex items-center gap-2">
+              <input
+                v-model="newCalendarName"
+                type="text"
+                placeholder="Kalendernavn..."
+                class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+              <input
+                v-model="newCalendarColor"
+                type="color"
+                class="w-7 h-7 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
+                title="Vælg farve"
+              />
+            </div>
+            <div>
+              <input
+                v-model="newCalendarUrl"
+                type="text"
+                placeholder="Valgfri CalDAV URL..."
+                class="w-full px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </template>
+
+          <div class="flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              class="px-2 py-1 rounded-lg text-[11px] text-slate-300 hover:bg-slate-800"
+              @click="showNewCalendarForm = false"
+            >
+              Annullér
+            </button>
+            <button
+              type="submit"
+              :disabled="isCreatingCalendar"
+              class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
+            >
+              {{
+                isCreatingCalendar
+                  ? 'Henter...'
+                  : addCalendarMode === 'SUBSCRIBE'
+                    ? 'Abonnér'
+                    : newCalendarUrl
+                      ? 'Tilføj link'
+                      : 'Opret ny'
+              }}
+            </button>
+          </div>
+        </form>
+
+        <div class="space-y-1.5">
+          <div
+            v-for="cal in store.calendars"
+            :key="cal.id"
+            class="group p-2 rounded-xl border transition flex items-center justify-between gap-1.5"
+            :class="cal.visible
+              ? 'bg-slate-800/60 border-slate-700/70'
+              : 'bg-slate-900/40 border-slate-800/50 opacity-60'"
+          >
+            <label class="flex items-center gap-2 min-w-0 cursor-pointer flex-1">
+              <input
+                type="checkbox"
+                :checked="cal.visible"
+                class="rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-0 cursor-pointer shrink-0"
+                @change="store.toggleCalendarVisibility(cal.id)"
+              />
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1">
+                  <span class="text-xs font-medium text-slate-100 truncate" :title="cal.name">
+                    {{ cal.name }}
+                  </span>
+                  <span
+                    v-if="cal.isSubscribed || cal.id.startsWith('sub::')"
+                    class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[9px] font-semibold shrink-0"
+                    title="Abonneret kalender (opdateres automatisk, skrivebeskyttet)"
+                  >
+                    <Rss class="w-2.5 h-2.5" />
+                  </span>
+                  <span
+                    v-else-if="cal.readOnly"
+                    class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[9px] font-semibold shrink-0"
+                    title="Skrivebeskyttet kalender (Read-Only)"
+                  >
+                    <Lock class="w-2.5 h-2.5" />
+                  </span>
+                </div>
+                <div v-if="cal.isSubscribed || cal.id.startsWith('sub::')" class="text-[10px] text-slate-400 truncate">
+                  {{ cal.owner || 'Kalender-abonnement' }}
+                </div>
+                <div v-else-if="cal.isShared || cal.owner" class="text-[10px] text-slate-400 truncate">
+                  Delt af {{ cal.owner || 'ejer' }}
+                </div>
+              </div>
+            </label>
+
+            <div class="flex items-center gap-0.5 shrink-0">
+              <template v-if="!store.isPublicShareMode">
+                <button
+                  v-if="!cal.isSubscribed && !cal.id.startsWith('sub::')"
+                  type="button"
+                  class="p-1 rounded hover:bg-blue-500/20 text-slate-400 hover:text-blue-300 transition"
+                  title="Del denne kalender via offentligt Read-Only link"
+                  @click="store.openShareModal(cal.id)"
+                >
+                  <Share2 class="w-3 h-3" />
+                </button>
+                <button
+                  v-if="(!cal.readOnly && !cal.isShared) || cal.isSubscribed || cal.id.startsWith('sub::')"
+                  type="button"
+                  class="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
+                  :title="cal.isSubscribed || cal.id.startsWith('sub::') ? 'Afmeld kalender-abonnement' : 'Slet kalender (inkl. alle begivenheder)'"
+                  @click="confirmDeleteCalendar(cal.id, cal.name, Boolean(cal.isSubscribed || cal.id.startsWith('sub::')))"
+                >
+                  <Trash2 class="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                  title="Fjern/skjul kalender fra listen"
+                  @click="store.hideCalendar(cal.id)"
+                >
+                  <EyeOff class="w-3 h-3" />
+                </button>
+              </template>
+
+              <button
+                v-if="cal.localColorOverride && cal.localColorOverride !== cal.serverColor"
+                type="button"
+                class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                title="Gendan serverfarve"
+                @click="store.setCalendarColorOverride(cal.id, null)"
+              >
+                <RotateCcw class="w-3 h-3" />
+              </button>
+              <label
+                class="w-4 h-4 rounded-full border border-white/20 cursor-pointer flex items-center justify-center overflow-hidden shadow-inner ml-0.5"
+                :style="{ backgroundColor: cal.color }"
+                title="Klik for at overskrive kalenderfarven lokalt"
+              >
+                <input
+                  type="color"
+                  :value="cal.color"
+                  class="opacity-0 w-0 h-0"
+                  @input="handleColorChange(cal.id, $event)"
+                />
+              </label>
+            </div>
+          </div>
+
+          <!-- Automatisk Fødselsdagskalender fra Brogaard Kontakter (CardDAV) -->
+          <div
+            v-if="!store.isPublicShareMode && contactsStore.contactsWithBirthdaysCount > 0"
+            class="p-2 rounded-xl border transition flex items-center justify-between gap-1.5"
+            :class="store.showContactBirthdays
+              ? 'bg-pink-950/25 border-pink-500/40'
+              : 'bg-slate-900/40 border-slate-800/50 opacity-60'"
+          >
+            <label class="flex items-center gap-2 min-w-0 cursor-pointer flex-1">
+              <input
+                type="checkbox"
+                :checked="store.showContactBirthdays"
+                class="rounded border-slate-600 bg-slate-900 text-pink-500 focus:ring-0 cursor-pointer shrink-0"
+                @change="store.toggleContactBirthdays()"
+              />
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1">
+                  <Cake class="w-3 h-3 text-pink-400 shrink-0" />
+                  <span class="text-xs font-medium text-slate-100 truncate">Fødselsdage</span>
+                </div>
+                <div class="text-[10px] text-slate-400 truncate">
+                  {{ contactsStore.contactsWithBirthdaysCount }} fra Kontakter
+                </div>
+              </div>
+            </label>
+            <span class="w-3.5 h-3.5 rounded-full bg-pink-500 border border-white/20 shrink-0"></span>
+          </div>
+        </div>
+
+        <button
+          v-if="!store.isPublicShareMode && store.hiddenCalendarIds.length > 0"
+          type="button"
+          class="mt-2 w-full py-1 px-2 rounded-lg bg-slate-800/60 hover:bg-slate-800 border border-slate-700/70 text-[11px] text-slate-300 flex items-center justify-center gap-1.5 transition"
+          @click="store.restoreHiddenCalendars()"
+        >
+          <RotateCcw class="w-3 h-3" />
+          Vis {{ store.hiddenCalendarIds.length }} skjult(e) igen
+        </button>
+      </div>
+
+      <div
+        v-if="store.isPublicShareMode"
+        class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-1.5 text-xs text-amber-200"
+      >
+        <div class="flex items-center gap-1.5 font-semibold">
+          <Lock class="w-4 h-4 text-amber-400 shrink-0" />
+          <span class="truncate">Kun visning (Read-Only)</span>
+        </div>
+        <p class="text-[11px] text-slate-300 leading-relaxed">
+          Du ser en offentligt delt kalender. Klik på en aftale for at se detaljer.
+        </p>
+      </div>
+
+      <div v-else-if="store.writableCalendars.length > 1">
+        <label class="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+          Mål-kalender (Ny / Indsæt)
+        </label>
+        <select
+          v-model="store.activeTargetCalendarId"
+          class="w-full text-xs bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-blue-500"
+        >
+          <option
+            v-for="wCal in store.writableCalendars"
+            :key="wCal.id"
+            :value="wCal.id"
+          >
+            {{ wCal.name }}
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Bund: Udklipsholder + Del kalender + Papirkurv & Notifikationer -->
+    <div v-if="!store.isPublicShareMode" class="space-y-2.5 pt-3 border-t border-slate-800">
+      <div
+        v-if="store.clipboard.events.length > 0"
+        class="p-3 rounded-xl border transition-all space-y-2 bg-emerald-950/20 border-emerald-500/50 shadow-lg shadow-emerald-950/20"
+      >
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-1.5 text-xs font-bold text-slate-100 truncate">
+            <Clipboard v-if="store.clipboard.mode !== 'CUT'" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <Scissors v-else class="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span class="truncate">Udklipsholder</span>
+          </div>
+
+          <div class="flex items-center gap-1 shrink-0">
+            <span
+              class="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+              :class="store.clipboard.mode === 'CUT'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'"
+            >
+              {{ store.clipboard.mode === 'CUT' ? 'KLIP' : 'KOPI' }} ({{ store.clipboard.events.length }})
+            </span>
+            <button
+              type="button"
+              class="p-0.5 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition"
+              title="Tøm udklipsholder"
+              @click="store.clearClipboard()"
+            >
+              <X class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <div class="max-h-40 overflow-y-auto space-y-1.5 pr-0.5">
+            <div
+              v-for="ev in store.clipboard.events"
+              :key="ev.id"
+              class="p-2 rounded-lg bg-slate-900/95 border border-slate-700/80 flex items-start justify-between gap-1.5"
+            >
+              <div class="flex items-start gap-2 min-w-0">
+                <span
+                  class="w-2 h-2 rounded-full shrink-0 mt-1"
+                  :style="{ backgroundColor: store.getCalendarById(ev.calendarId)?.color || '#10b981' }"
+                ></span>
+                <div class="min-w-0">
+                  <div class="text-xs font-semibold text-slate-100 truncate" :title="ev.title">
+                    {{ ev.title }}
+                  </div>
+                  <div class="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5">
+                    <Clock class="w-2.5 h-2.5 shrink-0" />
+                    <span class="truncate">{{ formatEventTimeSpan(ev) }}</span>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="text-slate-500 hover:text-rose-400 p-0.5 shrink-0"
+                title="Fjern fra udklipsholder"
+                @click="removeSingleClipboardEvent(ev.id)"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+
+          <div class="pt-1.5 border-t border-slate-800/90 space-y-1.5">
+            <div class="flex items-center justify-between text-[11px]">
+              <span class="text-slate-400">Mål-dato:</span>
+              <strong class="text-blue-400 font-semibold">{{ store.selectedDateStr.slice(0, 10) }}</strong>
+            </div>
+            <button
+              type="button"
+              class="w-full py-1.5 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow transition"
+              @click="store.pasteToDate()"
+            >
+              <ClipboardPaste class="w-3.5 h-3.5 shrink-0" />
+              <span class="truncate">Indsæt her (Ctrl+V)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-1.5">
+        <button
+          type="button"
+          class="flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-xs text-blue-300 font-semibold transition"
+          title="Del kalender via offentligt Read-Only link"
+          @click="store.openShareModal()"
+        >
+          <Share2 class="w-3.5 h-3.5 shrink-0" />
+          <span class="truncate">Del link</span>
+        </button>
+
+        <button
+          type="button"
+          class="flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 text-xs text-slate-200 font-semibold transition"
+          title="Importér eller eksportér kalender (.ics)"
+          @click="store.openImportExportModal()"
+        >
+          <ArrowUpDown class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span class="truncate">Import/Eksport</span>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-1.5">
+        <button
+          type="button"
+          class="flex items-center justify-between px-2 py-2 rounded-xl bg-slate-800/70 hover:bg-slate-800 border border-slate-700/70 text-xs text-slate-200 transition"
+          title="Åbn 30-dages papirkurv"
+          @click="store.isTrashModalOpen = true"
+        >
+          <span class="flex items-center gap-1.5 font-medium truncate">
+            <Trash2 class="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span class="truncate">Papirkurv</span>
+          </span>
+          <span class="px-1.5 py-0.5 rounded-full bg-slate-900 text-slate-300 text-[10px] font-semibold shrink-0">
+            {{ store.trashItems.length }}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          class="flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-xs text-rose-300 font-semibold transition"
+          title="Bulk-oprydning: Find og slet gamle begivenheder før en valgt dato"
+          @click="store.isBulkDeleteModalOpen = true"
+        >
+          <Trash2 class="w-3.5 h-3.5 shrink-0" />
+          <span class="truncate">Slet gamle</span>
+        </button>
+      </div>
+
+      <button
+        v-if="notifPermission !== 'granted'"
+        type="button"
+        class="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-700/60 text-[11px] text-slate-300 transition"
+        @click="enableNotifications"
+      >
+        <Bell class="w-3.5 h-3.5 shrink-0" />
+        <span class="truncate">Aktivér påmindelser</span>
+      </button>
+    </div>
+  </aside>
+</template>
