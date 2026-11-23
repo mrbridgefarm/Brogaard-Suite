@@ -55,7 +55,7 @@ function extractTagInnerXml(xml: string, localName: string): string | null {
 
 function extractHrefs(xml: string): string[] {
   const matches = xml.matchAll(
-    /<(?:[a-zA-Z0-9_-]+:)?href(?:\s[^>]*?)?(?<!/)>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?href>/gi
+    /<(?:[a-zA-Z0-9_-]+:)?href(?:\s[^>]*?)?(?<!\/)>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?href>/gi
   );
   const hrefs: string[] = [];
   for (const m of matches) {

@@ -274,7 +274,7 @@ function extractTagInnerXml(xml: string, localName: string): string | null {
 
 function extractHrefs(xml: string): string[] {
   const matches = xml.matchAll(
-    /<(?:[a-zA-Z0-9_-]+:)?href(?:\s[^>]*?)?(?<!/)>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?href>/gi
+    /<(?:[a-zA-Z0-9_-]+:)?href(?:\s[^>]*?)?(?<!\/)>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?href>/gi
   );
   const hrefs: string[] = [];
   for (const m of matches) {
@@ -397,7 +397,7 @@ async function fetchCalendarsDirectPropfind(
 
   for (const block of responseBlocks) {
     const hrefMatch = block.match(
-      /<(?:[a-zA-Z0-9_-]+:)?href(?:\s[^>]*?)?(?<!/)>([^<]+)<\/(?:[a-zA-Z0-9_-]+:)?href>/i
+      /<(?:[a-zA-Z0-9_-]+:)?href(?:\s[^>]*?)?(?<!\/)>([^<]+)<\/(?:[a-zA-Z0-9_-]+:)?href>/i
     );
     if (!hrefMatch) continue;
     const rawHref = hrefMatch[1].trim();
