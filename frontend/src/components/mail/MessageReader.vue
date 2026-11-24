@@ -471,8 +471,8 @@ function downloadIcsInvite() {
           <button
             type="button"
             class="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 transition"
-            title="Flyt til papirkurv (Delete)"
-            @click="store.deleteSelectedMessages([msg])"
+            title="Flyt til papirkurv (Del) • Hold Shift for permanent sletning (Shift+Del)"
+            @click="store.deleteSelectedMessages([msg], $event.shiftKey)"
           >
             <Trash2 class="w-3.5 h-3.5" />
           </button>

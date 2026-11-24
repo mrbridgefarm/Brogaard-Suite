@@ -864,10 +864,11 @@ export async function deleteMessages(
   const uidRange = uids.join(',');
 
   return withImap(creds, async (client) => {
-    const list = await client.list();
-    const trashBox = list.find(
-      (b) => detectSpecialUse(b.path, b.name, b.specialUse) === 'trash'
-    );
+    const trashBox = permanent
+      ? undefined
+      : (await client.list()).find(
+          (b) => detectSpecialUse(b.path, b.name, b.specialUse) === 'trash'
+        );
 
     const lock = await client.getMailboxLock(folderPath);
     try {

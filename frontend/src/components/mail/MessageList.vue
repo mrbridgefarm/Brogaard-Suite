@@ -186,8 +186,8 @@ function formatSmartDate(iso: string): string {
         <button
           type="button"
           class="p-1.5 rounded-lg hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 transition"
-          title="Slet valgte e-mails (Delete)"
-          @click="store.deleteSelectedMessages()"
+          title="Flyt til papirkurv (Del) • Hold Shift for permanent sletning (Shift+Del)"
+          @click="store.deleteSelectedMessages(undefined, $event.shiftKey)"
         >
           <Trash2 class="w-3.5 h-3.5" />
         </button>

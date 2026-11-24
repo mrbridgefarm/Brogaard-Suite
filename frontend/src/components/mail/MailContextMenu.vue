@@ -16,7 +16,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   CalendarPlus,
-  UserPlus
+  UserPlus,
+  XCircle
 } from 'lucide-vue-next';
 import { useMailStore } from '../../stores/mailStore';
 import { useSuiteStore } from '../../stores/suiteStore';
@@ -212,6 +213,7 @@ function handleCreateCalendarEvent() {
         </button>
 
         <button
+          v-if="store.activeFolder?.specialUse !== 'trash'"
           type="button"
           class="w-full px-3 py-1.5 hover:bg-rose-500/20 text-rose-300 flex items-center justify-between"
           @click="store.deleteSelectedMessages(selectedMessages); store.closeContextMenu()"
@@ -220,6 +222,17 @@ function handleCreateCalendarEvent() {
             <Trash2 class="w-3.5 h-3.5" /> Flyt til papirkurv
           </span>
           <kbd class="text-[10px] text-rose-400">Del</kbd>
+        </button>
+
+        <button
+          type="button"
+          class="w-full px-3 py-1.5 hover:bg-rose-600/25 text-rose-300 flex items-center justify-between"
+          @click="store.deleteSelectedMessages(selectedMessages, true); store.closeContextMenu()"
+        >
+          <span class="flex items-center gap-2">
+            <XCircle class="w-3.5 h-3.5 text-rose-400" /> Slet permanent
+          </span>
+          <kbd class="text-[10px] text-rose-400">Shift+Del</kbd>
         </button>
       </template>
 

@@ -167,9 +167,9 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
       e.preventDefault();
       mailStore.openComposeModal('NEW');
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (mailStore.selectedMessageIds.length > 0) {
+      if (mailStore.selectedMessageIds.length > 0 || mailStore.activeMessageId) {
         e.preventDefault();
-        void mailStore.deleteSelectedMessages();
+        void mailStore.deleteSelectedMessages(undefined, e.shiftKey);
       }
     } else if (!isCtrlOrMeta && e.key === 'ArrowDown') {
       e.preventDefault();

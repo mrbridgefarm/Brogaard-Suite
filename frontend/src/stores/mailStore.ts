@@ -818,24 +818,70 @@ export const useMailStore = defineStore('mail', () => {
     }
   }
 
-  async function deleteSelectedMessages(explicitMessages?: MailHeader[]) {
+  async function deleteSelectedMessages(explicitMessages?: MailHeader[], forcePermanent = false) {
+    const selected =
+      explicitMessages && explicitMessages.length > 0
+        ? explicitMessages
+        : messages.value.filter((m) => selectedMessageIds.value.includes(m.id));
     const targets =
-      explicitMessages || messages.value.filter((m) => selectedMessageIds.value.includes(m.id));
+      selected.length > 0
+        ? selected
+        : activeMessageDetail.value
+          ? [activeMessageDetail.value]
+          : [];
 
     if (targets.length === 0) return;
-    const folder = targets[0].folder;
-    const uids = targets.map((m) => m.uid);
-    const isTrashFolder = activeFolder.value?.specialUse === 'trash';
+
+    const trashFolderPaths = new Set(
+      folders.value.filter((f) => f.specialUse === 'trash').map((f) => f.path)
+    );
+    const allAlreadyInTrash = targets.every((m) => trashFolderPaths.has(m.folder));
+    const needsPermanentConfirm =
+      forcePermanent || allAlreadyInTrash || activeFolder.value?.specialUse === 'trash';
+
+    if (needsPermanentConfirm) {
+      const confirmText =
+        targets.length === 1
+          ? `Vil du slette "${targets[0].subject || '(Intet emne)'}" permanent?\n\nE-mailen flyttes IKKE til papirkurven og kan ikke gendannes.`
+          : `Vil du slette ${targets.length} e-mails permanent?\n\nDe flyttes IKKE til papirkurven og kan ikke gendannes.`;
+      if (!window.confirm(confirmText)) {
+        return;
+      }
+    }
+
+    const byFolder = new Map<string, number[]>();
+    for (const m of targets) {
+      const list = byFolder.get(m.folder) || [];
+      list.push(m.uid);
+      byFolder.set(m.folder, list);
+    }
 
     isSyncing.value = true;
     try {
-      const res = await deleteMessagesApi({
-        folder,
-        uids,
-        permanent: isTrashFolder
-      });
+      let movedToTrashCount = 0;
+      let deletedPermanentCount = 0;
+      let lastTrashFolder = '';
+      const movedBackups: Array<{ folder: string; trashFolder: string; uids: number[] }> = [];
 
-      const idSet = new Set(targets.map((m) => m.id));
+      for (const [folderPath, folderUids] of byFolder.entries()) {
+        const permanentForFolder = forcePermanent || trashFolderPaths.has(folderPath);
+        const res = await deleteMessagesApi({
+          folder: folderPath,
+          uids: folderUids,
+          permanent: permanentForFolder
+        });
+
+        if (res.movedToTrash && res.trashFolder) {
+          movedToTrashCount += folderUids.length;
+          lastTrashFolder = res.trashFolder;
+          movedBackups.push({ folder: folderPath, trashFolder: res.trashFolder, uids: folderUids });
+        } else {
+          deletedPermanentCount += folderUids.length;
+        }
+      }
+
+      const ids = targets.map((m) => m.id);
+      const idSet = new Set(ids);
       messages.value = messages.value.filter((m) => !idSet.has(m.id));
       if (activeMessageId.value && idSet.has(activeMessageId.value)) {
         activeMessageId.value = null;
@@ -843,17 +889,40 @@ export const useMailStore = defineStore('mail', () => {
       }
       selectedMessageIds.value = selectedMessageIds.value.filter((id) => !idSet.has(id));
 
-      if (res.movedToTrash && res.trashFolder) {
-        pushUndoAction({
-          label: `Flyttede ${uids.length} e-mail(s) til Papirkurv`,
-          type: 'TRANSFER',
-          sourceFolder: folder,
-          targetFolder: res.trashFolder,
-          uids
-        });
-        notify('Flyttet til Papirkurv', `${uids.length} e-mail(s) blev lagt i papirkurven.`, 'info');
+      try {
+        await db.mailHeaders.bulkDelete(ids);
+        await db.mailDetails.bulkDelete(ids);
+      } catch {
+        // Ignorér cache-oprydningsfejl
+      }
+
+      if (movedToTrashCount > 0 && deletedPermanentCount === 0) {
+        if (movedBackups.length === 1) {
+          pushUndoAction({
+            label: `Flyttede ${movedToTrashCount} e-mail(s) til Papirkurv`,
+            type: 'TRANSFER',
+            sourceFolder: movedBackups[0].folder,
+            targetFolder: lastTrashFolder,
+            uids: movedBackups[0].uids
+          });
+        }
+        notify(
+          'Flyttet til Papirkurv',
+          `${movedToTrashCount} e-mail(s) blev lagt i papirkurven.`,
+          'info'
+        );
+      } else if (deletedPermanentCount > 0 && movedToTrashCount === 0) {
+        notify(
+          'Slettet permanent',
+          `${deletedPermanentCount} e-mail(s) blev slettet permanent uden om papirkurven.`,
+          'warning'
+        );
       } else {
-        notify('Slettet permanent', `${uids.length} e-mail(s) blev slettet permanent.`, 'warning');
+        notify(
+          'Sletning fuldført',
+          `${movedToTrashCount} lagt i papirkurv, ${deletedPermanentCount} slettet permanent.`,
+          'info'
+        );
       }
 
       void fetchFoldersApi().then((f) => (folders.value = f));
