@@ -221,13 +221,18 @@ export async function apiUpsertUserShare(params: {
 
 export async function apiUpdateUserSharePermission(
   shareId: string,
-  permission: CalendarSharePermission
+  permission: CalendarSharePermission,
+  meta?: { calendarName?: string; calendarColor?: string }
 ): Promise<UserCalendarShare> {
   const res = await fetch(`/api/caldav/user-shares/${encodeURIComponent(shareId)}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ permission })
+    body: JSON.stringify({
+      permission,
+      calendarName: meta?.calendarName,
+      calendarColor: meta?.calendarColor
+    })
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -250,7 +255,7 @@ export async function apiDeleteUserShare(shareId: string): Promise<void> {
 export async function apiLeaveSharedCalendar(params: {
   shareId?: string;
   calendarUrl?: string;
-}): Promise<{ removedCount: number; removedOwners: string[] }> {
+}): Promise<{ removedCount: number; removedOwners: string[]; unsubscribedInSogo?: boolean }> {
   const res = await fetch('/api/caldav/user-shares/leave', {
     method: 'POST',
     credentials: 'include',
@@ -263,7 +268,8 @@ export async function apiLeaveSharedCalendar(params: {
   }
   return {
     removedCount: Number(data.removedCount || 0),
-    removedOwners: Array.isArray(data.removedOwners) ? data.removedOwners : []
+    removedOwners: Array.isArray(data.removedOwners) ? data.removedOwners : [],
+    unsubscribedInSogo: Boolean(data.unsubscribedInSogo)
   };
 }
 

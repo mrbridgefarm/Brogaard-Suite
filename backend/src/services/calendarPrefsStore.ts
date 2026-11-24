@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getWritableDataDir, getCandidateDataDirs } from './cryptoStore.js';
-import { ensureTrailingSlash } from './davClient.js';
+import { ensureTrailingSlash, canonicalSogoCalendarSignature } from './davClient.js';
 
 export interface UserCalendarPrefs {
   nameOverrides: Record<string, string>;
@@ -115,6 +115,23 @@ export function canonicalCalendarPrefKey(idOrUrl: string): string {
   return raw.toLowerCase();
 }
 
+function buildCalendarPrefCandidates(calendarId?: string, calendarUrl?: string): string[] {
+  const rawValues = [calendarUrl, calendarId].filter(
+    (v): v is string => typeof v === 'string' && v.trim().length > 0
+  );
+  const candidates = new Set<string>();
+
+  for (const val of rawValues) {
+    const canon = canonicalCalendarPrefKey(val);
+    if (canon) candidates.add(canon);
+    const sig = canonicalSogoCalendarSignature(val);
+    if (sig) candidates.add(sig);
+    candidates.add(val.trim());
+  }
+
+  return Array.from(candidates);
+}
+
 export function getCalendarNameOverrides(username: string): Record<string, string> {
   const userKey = username.toLowerCase().trim();
   if (!userKey) return {};
@@ -128,17 +145,8 @@ export function resolveCalendarNameOverride(
   calendarUrl?: string
 ): string | undefined {
   if (!overrides) return undefined;
-  if (calendarUrl) {
-    const urlCanonical = canonicalCalendarPrefKey(calendarUrl);
-    if (urlCanonical && overrides[urlCanonical]) return overrides[urlCanonical];
-  }
-  if (calendarId) {
-    const idCanonical = canonicalCalendarPrefKey(calendarId);
-    if (idCanonical && overrides[idCanonical]) return overrides[idCanonical];
-    if (overrides[calendarId]) return overrides[calendarId];
-  }
-  if (calendarUrl && overrides[calendarUrl]) {
-    return overrides[calendarUrl];
+  for (const cand of buildCalendarPrefCandidates(calendarId, calendarUrl)) {
+    if (overrides[cand]) return overrides[cand];
   }
   return undefined;
 }
@@ -155,6 +163,8 @@ export function setCalendarNameOverride(
   if (!primaryKey) return getCalendarNameOverrides(username);
 
   const secondaryKey = secondaryIdOrUrl ? canonicalCalendarPrefKey(secondaryIdOrUrl) : '';
+  const primarySig = canonicalSogoCalendarSignature(calendarIdOrUrl) || '';
+  const secondarySig = secondaryIdOrUrl ? canonicalSogoCalendarSignature(secondaryIdOrUrl) || '' : '';
   const rawPrimary = calendarIdOrUrl.trim();
   const rawSecondary = secondaryIdOrUrl ? secondaryIdOrUrl.trim() : '';
   const clean = typeof aliasName === 'string' ? aliasName.trim().slice(0, 80) : '';
@@ -164,13 +174,17 @@ export function setCalendarNameOverride(
 
   if (!clean) {
     delete prefs.nameOverrides[primaryKey];
+    if (primarySig) delete prefs.nameOverrides[primarySig];
     if (rawPrimary && rawPrimary !== primaryKey) delete prefs.nameOverrides[rawPrimary];
     if (secondaryKey) delete prefs.nameOverrides[secondaryKey];
+    if (secondarySig) delete prefs.nameOverrides[secondarySig];
     if (rawSecondary && rawSecondary !== secondaryKey) delete prefs.nameOverrides[rawSecondary];
   } else {
     prefs.nameOverrides[primaryKey] = clean;
+    if (primarySig && primarySig !== primaryKey) delete prefs.nameOverrides[primarySig];
     if (rawPrimary && rawPrimary !== primaryKey) delete prefs.nameOverrides[rawPrimary];
     if (secondaryKey && secondaryKey !== primaryKey) delete prefs.nameOverrides[secondaryKey];
+    if (secondarySig && secondarySig !== primaryKey) delete prefs.nameOverrides[secondarySig];
     if (rawSecondary && rawSecondary !== primaryKey && rawSecondary !== secondaryKey) {
       delete prefs.nameOverrides[rawSecondary];
     }
@@ -195,11 +209,10 @@ export function isSharedCalendarDismissed(
   const dismissed = getDismissedSharedCalendars(username);
   if (dismissed.length === 0) return false;
   const dismissedSet = new Set(dismissed.map((k) => canonicalCalendarPrefKey(k)));
-  if (calendarId && dismissedSet.has(canonicalCalendarPrefKey(calendarId))) {
-    return true;
-  }
-  if (calendarUrl && dismissedSet.has(canonicalCalendarPrefKey(calendarUrl))) {
-    return true;
+  for (const cand of buildCalendarPrefCandidates(calendarId, calendarUrl)) {
+    if (dismissedSet.has(canonicalCalendarPrefKey(cand))) {
+      return true;
+    }
   }
   return false;
 }
@@ -207,12 +220,23 @@ export function isSharedCalendarDismissed(
 export function addDismissedSharedCalendar(username: string, calendarIdOrUrl: string): void {
   const userKey = username.toLowerCase().trim();
   const key = canonicalCalendarPrefKey(calendarIdOrUrl);
+  const sig = canonicalSogoCalendarSignature(calendarIdOrUrl);
   if (!userKey || !key) return;
 
   const all = readAllPrefs();
   const { prefs } = getOrCreateUserPrefs(all, userKey);
+  let changed = false;
+
   if (!prefs.dismissedSharedCalendars.includes(key)) {
     prefs.dismissedSharedCalendars.push(key);
+    changed = true;
+  }
+  if (sig && !prefs.dismissedSharedCalendars.includes(sig)) {
+    prefs.dismissedSharedCalendars.push(sig);
+    changed = true;
+  }
+
+  if (changed) {
     writeAllPrefs(all);
   }
 }
@@ -220,13 +244,15 @@ export function addDismissedSharedCalendar(username: string, calendarIdOrUrl: st
 export function removeDismissedSharedCalendar(username: string, calendarIdOrUrl: string): void {
   const userKey = username.toLowerCase().trim();
   const key = canonicalCalendarPrefKey(calendarIdOrUrl);
+  const sig = canonicalSogoCalendarSignature(calendarIdOrUrl);
   if (!userKey || !key) return;
 
   const all = readAllPrefs();
   const entry = all[userKey];
   if (!entry) return;
 
-  const filtered = entry.dismissedSharedCalendars.filter((item) => item !== key);
+  const targetKeys = new Set([key, ...(sig ? [sig] : [])]);
+  const filtered = entry.dismissedSharedCalendars.filter((item) => !targetKeys.has(item));
   if (filtered.length !== entry.dismissedSharedCalendars.length) {
     entry.dismissedSharedCalendars = filtered;
     writeAllPrefs(all);
@@ -238,16 +264,18 @@ export function removeDismissedSharedCalendarForEmails(
   calendarIdOrUrl: string
 ): void {
   const key = canonicalCalendarPrefKey(calendarIdOrUrl);
+  const sig = canonicalSogoCalendarSignature(calendarIdOrUrl);
   const emailSet = new Set(emails.map((e) => e.toLowerCase().trim()).filter(Boolean));
   if (!key || emailSet.size === 0) return;
 
+  const targetKeys = new Set([key, ...(sig ? [sig] : [])]);
   const all = readAllPrefs();
   let changed = false;
 
   for (const userKey of Object.keys(all)) {
     if (!emailSet.has(userKey.toLowerCase().trim())) continue;
     const entry = all[userKey];
-    const filtered = entry.dismissedSharedCalendars.filter((item) => item !== key);
+    const filtered = entry.dismissedSharedCalendars.filter((item) => !targetKeys.has(item));
     if (filtered.length !== entry.dismissedSharedCalendars.length) {
       entry.dismissedSharedCalendars = filtered;
       changed = true;

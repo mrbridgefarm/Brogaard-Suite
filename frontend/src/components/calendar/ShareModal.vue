@@ -313,7 +313,7 @@ async function handleCreateShare() {
             </template>
 
             <p class="text-[11px] text-slate-400 leading-relaxed pt-1 border-t border-slate-800/80">
-              Modtageren får automatisk kalenderen vist i sin kalenderoversigt næste gang vedkommende synkroniserer eller logger ind i Brogaard Suite — og ændringer gemmes direkte på Mailcow/SOGo.
+              Delingen gemmes direkte i Mailcow/SOGo – så den virker automatisk i både Brogaard Suite, SOGo Webmail, mobil og andre kalenderapps uden dobbelt-deling.
             </p>
           </form>
 
@@ -324,7 +324,14 @@ async function handleCreateShare() {
             </h4>
 
             <div
-              v-if="store.userShares.length === 0"
+              v-if="store.isLoadingUserShares && store.userShares.length === 0"
+              class="p-5 text-center rounded-xl bg-slate-950/60 border border-slate-800 text-slate-400"
+            >
+              Henter eksisterende delinger fra SOGo...
+            </div>
+
+            <div
+              v-else-if="store.userShares.length === 0"
               class="p-5 text-center rounded-xl bg-slate-950/60 border border-slate-800 text-slate-400"
             >
               Du har ikke delt nogen kalendere med andre brugere endnu.
@@ -342,7 +349,18 @@ async function handleCreateShare() {
                     :style="{ backgroundColor: uShare.calendarColor }"
                   ></span>
                   <span class="font-semibold text-slate-100 truncate">
-                    {{ uShare.recipientEmail }}
+                    {{
+                      uShare.recipientDisplayName
+                        ? `${uShare.recipientDisplayName} (${uShare.recipientEmail})`
+                        : uShare.recipientEmail
+                    }}
+                  </span>
+                  <span
+                    v-if="uShare.source === 'sogo'"
+                    class="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[9.5px] font-semibold shrink-0"
+                    title="Gemt direkte i Mailcow/SOGo ACL"
+                  >
+                    SOGo
                   </span>
                 </div>
                 <div class="text-[11px] text-slate-400 truncate pl-4">

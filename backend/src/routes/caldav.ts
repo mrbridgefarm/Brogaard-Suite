@@ -35,11 +35,22 @@ import {
   upsertUserCalendarShare,
   updateUserCalendarSharePermission,
   deleteUserCalendarShare,
+  removeUserCalendarShareByTarget,
   leaveIncomingUserCalendarShare,
   resolveIncomingSharesForRecipient,
   findAuthorizedIncomingShareForUrl,
   isUrlInsideSharedCalendar
 } from '../services/userShareStore.js';
+import {
+  isSogoShareId,
+  SogoAclUnsupportedError,
+  SogoAclValidationError,
+  listSogoCalendarShares,
+  upsertSogoCalendarShare,
+  updateSogoCalendarSharePermission,
+  revokeSogoCalendarShare,
+  unsubscribeFromSogoSharedCalendar
+} from '../services/sogoAclService.js';
 import {
   getCalendarNameOverrides,
   resolveCalendarNameOverride,
@@ -783,23 +794,52 @@ caldavRouter.get('/public/:token', publicShareLimiter, async (req: Request, res:
 
 /**
  * GET /api/caldav/user-shares
- * Henter kalenderdelinger som den aktuelle bruger har oprettet til andre brugere (Læs / Skriv).
+ * Henter kalenderdelinger direkte fra Mailcow/SOGo ACL (samt evt. legacy/ikke-SOGo delinger).
  */
-caldavRouter.get('/user-shares', (req: Request, res: Response) => {
+caldavRouter.get('/user-shares', async (req: Request, res: Response) => {
+  let creds: CalDavCredentials;
   try {
-    const creds = requireDavCredentials(req);
-    const userShares = listOutgoingUserShares(creds.username);
-    res.json({ ok: true, userShares });
+    creds = requireDavCredentials(req);
   } catch (err: any) {
     res.status(401).json({ ok: false, error: err?.message || 'Kræver aktivt login.' });
+    return;
   }
+
+  let ownCalendars: CalendarInfoDTO[] = [];
+  try {
+    ownCalendars = await fetchCalendars(creds);
+    const savedNameOverrides = getCalendarNameOverrides(creds.username);
+    for (const cal of ownCalendars) {
+      const alias = resolveCalendarNameOverride(savedNameOverrides, cal.id, cal.url);
+      if (alias) cal.name = alias;
+    }
+  } catch {
+    ownCalendars = [];
+  }
+
+  const sogoShares = await listSogoCalendarShares(creds, ownCalendars).catch(() => []);
+  const sogoKeySet = new Set<string>();
+  for (const s of sogoShares) {
+    sogoKeySet.add(`${canonicalCalKey(s.calendarUrl)}::${s.recipientEmail.toLowerCase().trim()}`);
+    if (s.recipientUid) {
+      sogoKeySet.add(`${canonicalCalKey(s.calendarUrl)}::${s.recipientUid.toLowerCase().trim()}`);
+    }
+  }
+
+  const legacyShares = listOutgoingUserShares(creds.username)
+    .filter(
+      (ls) => !sogoKeySet.has(`${canonicalCalKey(ls.calendarUrl)}::${ls.recipientEmail.toLowerCase().trim()}`)
+    )
+    .map((ls) => ({ ...ls, source: 'suite' as const }));
+
+  res.json({ ok: true, userShares: [...sogoShares, ...legacyShares] });
 });
 
 /**
  * POST /api/caldav/user-shares
- * Deler en af brugerens egne kalendere med en anden bruger med enten 'read' eller 'write' rettighed.
+ * Deler en af brugerens egne kalendere direkte i Mailcow/SOGo (med fallback til lokal deling ved ikke-SOGo servere).
  */
-caldavRouter.post('/user-shares', (req: Request, res: Response) => {
+caldavRouter.post('/user-shares', async (req: Request, res: Response) => {
   try {
     const creds = requireDavCredentials(req);
     const calendarUrl = String(req.body?.calendarUrl || '').trim();
@@ -817,30 +857,59 @@ caldavRouter.post('/user-shares', (req: Request, res: Response) => {
       return;
     }
 
-    const userShare = upsertUserCalendarShare({
-      ownerCreds: creds,
-      calendarUrl,
-      calendarName,
-      calendarColor,
-      recipientEmail,
-      permission
-    });
-    removeDismissedSharedCalendarForEmails([recipientEmail], calendarUrl);
-
-    res.json({ ok: true, userShare });
+    try {
+      const sogoShare = await upsertSogoCalendarShare({
+        creds,
+        calendarUrl,
+        calendarName,
+        calendarColor,
+        recipientEmail,
+        permission,
+        subscribeRecipient: true
+      });
+      removeUserCalendarShareByTarget(creds.username, calendarUrl, recipientEmail);
+      if (sogoShare.recipientUid) {
+        removeUserCalendarShareByTarget(creds.username, calendarUrl, sogoShare.recipientUid);
+      }
+      removeDismissedSharedCalendarForEmails(
+        [recipientEmail, sogoShare.recipientEmail, sogoShare.recipientUid],
+        calendarUrl
+      );
+      res.json({ ok: true, userShare: sogoShare });
+      return;
+    } catch (sogoErr: any) {
+      if (sogoErr instanceof SogoAclValidationError) {
+        res.status(400).json({ ok: false, error: sogoErr.message });
+        return;
+      }
+      if (sogoErr instanceof SogoAclUnsupportedError) {
+        const fallbackShare = upsertUserCalendarShare({
+          ownerCreds: creds,
+          calendarUrl,
+          calendarName,
+          calendarColor,
+          recipientEmail,
+          permission
+        });
+        removeDismissedSharedCalendarForEmails([recipientEmail], calendarUrl);
+        res.json({ ok: true, userShare: { ...fallbackShare, source: 'suite' } });
+        return;
+      }
+      throw sogoErr;
+    }
   } catch (err: any) {
     res.status(400).json({
       ok: false,
-      error: err?.message || 'Kunne ikke dele kalenderen med brugeren.'
+      error: err?.message || 'Kunne ikke dele kalenderen med brugeren i SOGo.'
     });
   }
 });
 
 /**
  * PATCH /api/caldav/user-shares/:id
- * Opdaterer rettigheden ('read' <-> 'write') på en eksisterende bruger-deling.
+ * Opdaterer rettigheden ('read' <-> 'write') direkte i Mailcow/SOGo eller i fallback-registeret.
  */
-caldavRouter.patch('/user-shares/:id', (req: Request, res: Response) => {
+caldavRouter.patch('/user-shares/:id', async (req: Request, res: Response) => {
   try {
     const creds = requireDavCredentials(req);
     const rawId = req.params.id;
@@ -848,13 +917,22 @@ caldavRouter.patch('/user-shares/:id', (req: Request, res: Response) => {
     const permission: CalendarSharePermission =
       req.body?.permission === 'write' ? 'write' : 'read';
 
+    if (isSogoShareId(shareId)) {
+      const updated = await updateSogoCalendarSharePermission(creds, shareId, permission, {
+        calendarName: req.body?.calendarName ? String(req.body.calendarName) : undefined,
+        calendarColor: req.body?.calendarColor ? String(req.body.calendarColor) : undefined
+      });
+      res.json({ ok: true, userShare: updated });
+      return;
+    }
+
     const updated = updateUserCalendarSharePermission(creds.username, shareId, permission);
     if (!updated) {
       res.status(404).json({ ok: false, error: 'Kalenderdeling blev ikke fundet.' });
       return;
     }
 
-    res.json({ ok: true, userShare: updated });
+    res.json({ ok: true, userShare: { ...updated, source: 'suite' } });
   } catch (err: any) {
     res.status(400).json({
       ok: false,
@@ -865,13 +943,21 @@ caldavRouter.patch('/user-shares/:id', (req: Request, res: Response) => {
 
 /**
  * DELETE /api/caldav/user-shares/:id
- * Tilbagekalder en bruger-deling.
+ * Tilbagekalder en bruger-deling direkte i Mailcow/SOGo (eller i fallback-registeret).
  */
-caldavRouter.delete('/user-shares/:id', (req: Request, res: Response) => {
+caldavRouter.delete('/user-shares/:id', async (req: Request, res: Response) => {
   try {
     const creds = requireDavCredentials(req);
     const rawId = req.params.id;
     const shareId = String(Array.isArray(rawId) ? rawId[0] : rawId || '').trim();
+
+    if (isSogoShareId(shareId)) {
+      const { calendarUrl, recipientUid } = await revokeSogoCalendarShare(creds, shareId);
+      removeUserCalendarShareByTarget(creds.username, calendarUrl, recipientUid);
+      res.json({ ok: true, deleted: true });
+      return;
+    }
+
     const deleted = deleteUserCalendarShare(creds.username, shareId);
     res.json({ ok: true, deleted });
   } catch (err: any) {
@@ -884,9 +970,9 @@ caldavRouter.delete('/user-shares/:id', (req: Request, res: Response) => {
 
 /**
  * POST /api/caldav/user-shares/leave
- * Lader en modtager forlade en delt kalender og fjerner vedkommendes egne rettigheder permanent.
+ * Lader en modtager forlade en delt kalender: afmelder i SOGo + fjerner lokal adgang/fravalg.
  */
-caldavRouter.post('/user-shares/leave', (req: Request, res: Response) => {
+caldavRouter.post('/user-shares/leave', async (req: Request, res: Response) => {
   try {
     const creds = requireDavCredentials(req);
     const shareId = req.body?.shareId ? String(req.body.shareId).trim() : undefined;
@@ -903,12 +989,16 @@ caldavRouter.post('/user-shares/leave', (req: Request, res: Response) => {
       calendarUrl
     });
 
+    let unsubscribedInSogo = false;
     if (calendarUrl) {
+      unsubscribedInSogo = await unsubscribeFromSogoSharedCalendar(creds, calendarUrl).catch(
+        () => false
+      );
       addDismissedSharedCalendar(creds.username, calendarUrl);
       setCalendarNameOverride(creds.username, calendarUrl, null);
     }
 
-    res.json({ ok: true, removedCount, removedOwners });
+    res.json({ ok: true, removedCount, removedOwners, unsubscribedInSogo });
   } catch (err: any) {
     res.status(400).json({
       ok: false,

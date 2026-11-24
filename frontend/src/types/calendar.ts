@@ -130,7 +130,10 @@ export interface UserCalendarShare {
   calendarName: string;
   calendarColor: string;
   recipientEmail: string;
+  recipientDisplayName?: string;
   permission: CalendarSharePermission;
+  source?: 'sogo' | 'suite';
+  subscribedInSogo?: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -100,6 +100,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   const syncQueue = ref<SyncQueueItem[]>([]);
   const shares = ref<PublicShareLink[]>([]);
   const userShares = ref<UserCalendarShare[]>([]);
+  const isLoadingUserShares = ref<boolean>(false);
   const publicShareError = ref<string>('');
 
   const isSyncing = ref<boolean>(false);
@@ -720,10 +721,13 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   async function loadUserShares() {
     if (session.value?.mode !== 'CALDAV') return;
+    isLoadingUserShares.value = true;
     try {
       userShares.value = await apiListUserShares();
     } catch (err) {
       console.warn('Kunne ikke hente bruger-delinger:', err);
+    } finally {
+      isLoadingUserShares.value = false;
     }
   }
 
@@ -754,8 +758,10 @@ export const useCalendarStore = defineStore('calendar', () => {
         userShares.value.unshift(saved);
       }
       notify(
-        'Kalender delt!',
-        `"${cal.name}" er nu delt med ${saved.recipientEmail} (${saved.permission === 'write' ? 'Læs & Skriv' : 'Kun læsning'}).`,
+        saved.source === 'sogo' ? 'Kalender delt direkte i SOGo!' : 'Kalender delt!',
+        saved.source === 'sogo'
+          ? `"${cal.name}" er nu delt i Mailcow/SOGo med ${saved.recipientEmail} (${saved.permission === 'write' ? 'Læs & Skriv' : 'Kun læsning'}).`
+          : `"${cal.name}" er nu delt med ${saved.recipientEmail} (${saved.permission === 'write' ? 'Læs & Skriv' : 'Kun læsning'}).`,
         'success'
       );
       return saved;
@@ -771,13 +777,20 @@ export const useCalendarStore = defineStore('calendar', () => {
   ): Promise<boolean> {
     if (session.value?.mode !== 'CALDAV') return false;
     try {
-      const updated = await apiUpdateUserSharePermission(shareId, permission);
+      const existing = userShares.value.find((s) => s.id === shareId);
+      const updated = await apiUpdateUserSharePermission(
+        shareId,
+        permission,
+        existing
+          ? { calendarName: existing.calendarName, calendarColor: existing.calendarColor }
+          : undefined
+      );
       const idx = userShares.value.findIndex((s) => s.id === shareId);
       if (idx >= 0) {
-        userShares.value[idx] = updated;
+        userShares.value[idx] = { ...userShares.value[idx], ...updated };
       }
       notify(
-        'Rettighed opdateret',
+        updated.source === 'sogo' ? 'Rettighed opdateret i SOGo' : 'Rettighed opdateret',
         `${updated.recipientEmail} har nu adgang: ${updated.permission === 'write' ? 'Læs & Skriv' : 'Kun læsning'}.`,
         'success'
       );
@@ -794,7 +807,7 @@ export const useCalendarStore = defineStore('calendar', () => {
       await apiDeleteUserShare(shareId);
       userShares.value = userShares.value.filter((s) => s.id !== shareId);
       notify(
-        'Adgang tilbagekaldt',
+        shareId.startsWith('sogo::') ? 'Adgang tilbagekaldt i SOGo' : 'Adgang tilbagekaldt',
         'Brugeren har ikke længere adgang til denne delte kalender.',
         'info'
       );
@@ -1998,7 +2011,7 @@ export const useCalendarStore = defineStore('calendar', () => {
       return false;
     }
 
-    let res: { removedCount: number; removedOwners: string[] };
+    let res: { removedCount: number; removedOwners: string[]; unsubscribedInSogo?: boolean };
     try {
       res = await apiLeaveSharedCalendar({
         shareId: cal.userShareId,
@@ -2032,6 +2045,12 @@ export const useCalendarStore = defineStore('calendar', () => {
       notify(
         'Forlod delt kalender',
         `Dine adgangsrettigheder til "${cal.name}" er nu fjernet, og kalenderen er fjernet fra din oversigt.`,
+        'success'
+      );
+    } else if (res.unsubscribedInSogo) {
+      notify(
+        'Forlod delt kalender',
+        `Du er nu afmeldt "${cal.name}" i SOGo, og kalenderen er fjernet fra din oversigt i Brogaard Suite.`,
         'success'
       );
     } else {
@@ -2215,6 +2234,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     syncQueue,
     shares,
     userShares,
+    isLoadingUserShares,
     publicShareError,
     isOnline,
     isSyncing,

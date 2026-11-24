@@ -219,7 +219,7 @@ export async function readResponseTextSmart(res: Response): Promise<string> {
 /**
  * Direkte, status-tjekket HTTP/DAV-request mod Mailcow/SOGo.
  */
-async function davRequest(
+export async function davRequest(
   creds: CalDavCredentials,
   method: string,
   url: string,
@@ -292,7 +292,7 @@ function extractHrefs(xml: string): string[] {
  * Afkoder SOGo's mappe-slugs for abonnerede/delte kalendere i brugerens egen Calendar/-mappe,
  * f.eks. "anne_A_brogaard_D_dk_personal" -> { owner: "anne@brogaard.dk", slug: "personal" }.
  */
-function decodeSogoSharedSlugOwner(
+export function decodeSogoSharedSlugOwner(
   calUrl: string,
   normalizedUser: string
 ): { owner?: string; slug?: string } {
@@ -329,6 +329,30 @@ function decodeSogoSharedSlugOwner(
   }
 
   return {};
+}
+
+/**
+ * Bygger en kanonisk kalender-signatur på tværs af ejer-URL og modtagerens abonnerede slug-URL.
+ */
+export function canonicalSogoCalendarSignature(rawUrl: string, ownerHint?: string): string | null {
+  let decoded = '';
+  try {
+    decoded = decodeURIComponent(rawUrl || '');
+  } catch {
+    decoded = rawUrl || '';
+  }
+
+  const calMatch = decoded.match(/\/SOGo\/dav\/([^/]+)\/Calendar\/([^/]+)\/?$/i);
+  if (!calMatch || !calMatch[1] || !calMatch[2]) return null;
+
+  const slugDecoded = decodeSogoSharedSlugOwner(rawUrl, '');
+  if (slugDecoded.owner && slugDecoded.slug) {
+    return `sogo-cal::${slugDecoded.owner.toLowerCase().trim()}::${slugDecoded.slug.toLowerCase().trim()}`;
+  }
+
+  const effOwner = (ownerHint || calMatch[1]).toLowerCase().trim();
+  const slug = calMatch[2].toLowerCase().trim();
+  return `sogo-cal::${effOwner}::${slug}`;
 }
 
 interface PropfindHints {
@@ -474,9 +498,10 @@ async function fetchCalendarsDirectPropfind(
     const privSetXml = extractTagInnerXml(okXml, 'current-user-privilege-set');
     let privReadOnly: boolean | undefined;
     if (privSetXml && /<(?:[a-zA-Z0-9_-]+:)?privilege\b/i.test(privSetXml)) {
-      const hasWritePrivilege = /<(?:[a-zA-Z0-9_-]+:)?(?:write|write-content|all|bind)(?:\s|>|\/)/i.test(
-        privSetXml
-      );
+      const hasWritePrivilege =
+        /<(?:[a-zA-Z0-9_-]+:)?(?:write|write-content|all|bind|unbind|modify-public-records|modify-confidential-records|modify-private-records)(?:\s|>|\/)/i.test(
+          privSetXml
+        );
       privReadOnly = !hasWritePrivilege;
     }
 
@@ -521,6 +546,7 @@ async function fetchCalendarsDirectPropfind(
       serverColor: rawColor,
       readOnly,
       isShared,
+      sharePermission: isShared ? (readOnly ? 'read' : 'write') : undefined,
       owner,
       ctag,
       description
@@ -1196,7 +1222,7 @@ export async function deleteCalDavEvent(
   }
 }
 
-function escapeXml(value: string): string {
+export function escapeXml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

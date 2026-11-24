@@ -275,6 +275,31 @@ export function deleteUserCalendarShare(ownerUsername: string, shareId: string):
   return true;
 }
 
+export function removeUserCalendarShareByTarget(
+  ownerUsername: string,
+  calendarUrl: string,
+  recipientEmail: string
+): boolean {
+  const ownerLower = ownerUsername.toLowerCase().trim();
+  const targetCanonical = canonicalizeUrl(calendarUrl);
+  const recipLower = recipientEmail.toLowerCase().trim();
+  if (!ownerLower || !targetCanonical || !recipLower) return false;
+
+  const all = readAllUserShares();
+  const filtered = all.filter(
+    (r) =>
+      !(
+        r.ownerUsername.toLowerCase().trim() === ownerLower &&
+        canonicalizeUrl(r.calendarUrl) === targetCanonical &&
+        r.recipientEmail.toLowerCase().trim() === recipLower
+      )
+  );
+
+  if (filtered.length === all.length) return false;
+  writeAllUserShares(filtered);
+  return true;
+}
+
 /**
  * Lader en modtager forlade en delt kalender og fjerner vedkommendes adgangsrettigheder permanent.
  */
