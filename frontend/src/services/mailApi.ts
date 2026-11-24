@@ -173,6 +173,7 @@ export async function sendMailApi(params: {
   references?: string[];
   replyFolder?: string;
   replyUid?: number;
+  replaceDraft?: { folder: string; uid: number };
   attachments?: Array<{
     filename: string;
     contentType: string;
@@ -194,6 +195,9 @@ export async function saveDraftApi(params: {
   subject: string;
   textBody: string;
   htmlBody?: string;
+  inReplyTo?: string;
+  references?: string[];
+  replaceDraft?: { folder: string; uid: number };
   attachments?: Array<{
     filename: string;
     contentType: string;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue';
+import DOMPurify from 'dompurify';
 import {
   Send,
   X,
@@ -46,6 +47,7 @@ const inReplyTo = ref<string | undefined>(undefined);
 const references = ref<string[]>([]);
 const replyFolder = ref<string | undefined>(undefined);
 const replyUid = ref<number | undefined>(undefined);
+const draftRef = ref<{ folder: string; uid: number } | undefined>(undefined);
 
 const attachments = ref<
   Array<{
@@ -125,6 +127,36 @@ function htmlToPlainText(html: string): string {
   return (tmp.textContent || tmp.innerText || '').trim();
 }
 
+function extractEditableDraftHtml(rawHtml: string): string {
+  const clean = DOMPurify.sanitize(rawHtml, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form']
+  });
+  const doc = new DOMParser().parseFromString(clean, 'text/html');
+  const firstChild = doc.body.firstElementChild as HTMLElement | null;
+  if (
+    firstChild &&
+    doc.body.children.length === 1 &&
+    firstChild.tagName === 'DIV' &&
+    firstChild.getAttribute('style')?.includes('font-family:')
+  ) {
+    return firstChild.innerHTML;
+  }
+  return doc.body.innerHTML;
+}
+
+function formatDraftAddresses(list?: Array<{ name: string; address: string }>): string {
+  if (!list || list.length === 0) return '';
+  return list
+    .filter((a) => Boolean(a.address?.trim()))
+    .map((a) => {
+      const cleanName = (a.name || '').replace(/[,;"]/g, ' ').replace(/\s+/g, ' ').trim();
+      const cleanAddr = a.address.trim();
+      return cleanName ? `${cleanName} <${cleanAddr}>` : cleanAddr;
+    })
+    .join(', ');
+}
+
 function detectBestAliasForMessage(): string {
   const src = store.composeSourceMessage;
   if (src && store.composeMode !== 'NEW') {
@@ -154,6 +186,7 @@ watch(
     customFromEmail.value = '';
     attachments.value = [];
     activeAutocompleteField.value = null;
+    draftRef.value = undefined;
 
     const bestEmail = detectBestAliasForMessage();
     selectedAliasEmail.value = bestEmail;
@@ -166,8 +199,57 @@ watch(
     const mode = store.composeMode;
     const prefill = store.composePrefill;
     const sig = aliasObj?.signature ? `\n\n-- \n${aliasObj.signature}` : '';
+    let initialRichHtml: string | null = null;
 
-    if (!src || mode === 'NEW') {
+    if (src && mode === 'DRAFT') {
+      draftRef.value = { folder: src.folder, uid: src.uid };
+
+      const draftSender = src.from?.[0];
+      if (draftSender?.address) {
+        const senderLower = draftSender.address.toLowerCase().trim();
+        const matchedAlias = store.aliases.find(
+          (a) => a.email.toLowerCase().trim() === senderLower
+        );
+        if (matchedAlias || senderLower === store.username.toLowerCase().trim()) {
+          selectedAliasEmail.value = matchedAlias ? matchedAlias.email : draftSender.address.trim();
+          customFromName.value = draftSender.name || matchedAlias?.displayName || '';
+        } else {
+          customAliasMode.value = true;
+          customFromEmail.value = draftSender.address.trim();
+          customFromName.value = draftSender.name || '';
+        }
+      }
+
+      toInput.value = formatDraftAddresses(src.to);
+      ccInput.value = formatDraftAddresses(src.cc);
+      bccInput.value = formatDraftAddresses(src.bcc);
+      showCcBcc.value = Boolean(ccInput.value.length > 0 || bccInput.value.length > 0);
+      subject.value =
+        src.subject === '(Kladde uden emne)' || src.subject === '(Intet emne)'
+          ? ''
+          : src.subject || '';
+      textBody.value = src.textBody || '';
+      if (src.htmlBody?.trim()) {
+        initialRichHtml = extractEditableDraftHtml(src.htmlBody);
+        if (!textBody.value.trim()) {
+          textBody.value = htmlToPlainText(initialRichHtml);
+        }
+      }
+
+      inReplyTo.value = src.inReplyTo;
+      references.value = src.references || [];
+      replyFolder.value = undefined;
+      replyUid.value = undefined;
+
+      attachments.value = (src.attachments || [])
+        .filter((a) => !a.isInline && Boolean(a.contentBase64))
+        .map((a) => ({
+          filename: a.filename,
+          contentType: a.contentType,
+          contentBase64: a.contentBase64 as string,
+          size: a.size
+        }));
+    } else if (!src || mode === 'NEW') {
       toInput.value = prefill?.to?.join(', ') || '';
       ccInput.value = prefill?.cc?.join(', ') || '';
       bccInput.value = '';
@@ -237,7 +319,8 @@ watch(
 
     await nextTick();
     if (useRichHtml.value && richEditorRef.value) {
-      richEditorRef.value.innerHTML = plainTextToHtml(textBody.value);
+      richEditorRef.value.innerHTML =
+        initialRichHtml !== null ? initialRichHtml : plainTextToHtml(textBody.value);
     }
   },
   { immediate: true }
@@ -387,6 +470,7 @@ async function handleSubmitSend() {
     references: references.value,
     replyFolder: replyFolder.value,
     replyUid: replyUid.value,
+    replaceDraft: draftRef.value,
     attachments: attachments.value.map((a) => ({
       filename: a.filename,
       contentType: a.contentType,
@@ -411,12 +495,23 @@ async function handleSaveDraft() {
     subject: subject.value.trim() || '(Kladde uden emne)',
     textBody: content.text,
     htmlBody: content.html,
+    inReplyTo: inReplyTo.value,
+    references: references.value,
+    replaceDraft: draftRef.value,
     attachments: attachments.value.map((a) => ({
       filename: a.filename,
       contentType: a.contentType,
       contentBase64: a.contentBase64
     }))
   });
+}
+
+async function handleDiscardDraft() {
+  const src = store.composeSourceMessage;
+  store.isComposeModalOpen = false;
+  if (src && draftRef.value) {
+    await store.deleteSelectedMessages([src], false);
+  }
 }
 </script>
 
@@ -437,13 +532,15 @@ async function handleSaveDraft() {
             <div>
               <h3 class="text-sm font-bold text-slate-100">
                 {{
-                  store.composeMode === 'REPLY'
-                    ? 'Besvar e-mail'
-                    : store.composeMode === 'REPLY_ALL'
-                      ? 'Besvar alle'
-                      : store.composeMode === 'FORWARD'
-                        ? 'Videresend e-mail'
-                        : 'Skriv ny e-mail'
+                  store.composeMode === 'DRAFT'
+                    ? 'Redigér kladde'
+                    : store.composeMode === 'REPLY'
+                      ? 'Besvar e-mail'
+                      : store.composeMode === 'REPLY_ALL'
+                        ? 'Besvar alle'
+                        : store.composeMode === 'FORWARD'
+                          ? 'Videresend e-mail'
+                          : 'Skriv ny e-mail'
                 }}
               </h3>
               <p class="text-[11px] text-slate-400">
@@ -808,16 +905,30 @@ async function handleSaveDraft() {
           </div>
 
           <!-- Bundknapper -->
-          <div class="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
-            <button
-              type="button"
-              :disabled="store.isSendingMail"
-              class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium flex items-center gap-1.5 transition"
-              @click="handleSaveDraft"
-            >
-              <Save class="w-3.5 h-3.5 text-amber-400" />
-              <span>Gem som kladde</span>
-            </button>
+          <div class="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                :disabled="store.isSendingMail"
+                class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium flex items-center gap-1.5 transition"
+                @click="handleSaveDraft"
+              >
+                <Save class="w-3.5 h-3.5 text-amber-400" />
+                <span>{{ draftRef ? 'Opdatér kladde' : 'Gem som kladde' }}</span>
+              </button>
+
+              <button
+                v-if="draftRef"
+                type="button"
+                :disabled="store.isSendingMail"
+                class="px-3 py-2 rounded-xl bg-slate-900 hover:bg-rose-500/20 border border-slate-800 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 font-medium flex items-center gap-1.5 transition"
+                title="Flyt kladden til papirkurven"
+                @click="handleDiscardDraft"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+                <span>Kassér kladde</span>
+              </button>
+            </div>
 
             <div class="flex items-center gap-2">
               <button

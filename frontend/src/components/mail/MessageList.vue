@@ -4,6 +4,7 @@ import {
   Star,
   Paperclip,
   Reply,
+  Pencil,
   Trash2,
   MailOpen,
   Mail,
@@ -228,6 +229,7 @@ function formatSmartDate(iso: string): string {
           clipIdSet.has(msg.id) && store.clipboard.mode === 'COPY' ? 'outline-dashed outline-1 outline-emerald-400' : ''
         ]"
         @click="handleRowClick($event, msg)"
+        @dblclick="store.isDraftMessage(msg) ? store.editDraftMessage(msg) : undefined"
         @contextmenu.prevent="store.openMessageContextMenu($event, msg)"
         @dragstart="handleDragStart($event, msg)"
       >
@@ -270,6 +272,16 @@ function formatSmartDate(iso: string): string {
             </div>
 
             <div class="flex items-center gap-1.5 shrink-0">
+              <button
+                v-if="store.isDraftMessage(msg)"
+                type="button"
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 border border-amber-400/40 text-amber-200 text-[10px] font-semibold transition"
+                title="Klik for at redigere kladden videre"
+                @click.stop="store.editDraftMessage(msg)"
+              >
+                <Pencil class="w-2.5 h-2.5" />
+                <span>Redigér</span>
+              </button>
               <span
                 v-if="store.searchQuery.trim() || msg.folder !== store.activeFolderPath"
                 class="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-blue-300 text-[10px] font-semibold"

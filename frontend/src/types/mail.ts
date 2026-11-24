@@ -19,6 +19,7 @@ export interface MailAttachment {
   size: number;
   cid?: string;
   isInline: boolean;
+  contentBase64?: string;
 }
 
 export interface MailHeader {
@@ -40,6 +41,7 @@ export interface MailHeader {
 }
 
 export interface MailDetail extends MailHeader {
+  bcc?: MailAddress[];
   replyTo: MailAddress[];
   inReplyTo?: string;
   references: string[];
@@ -130,6 +132,6 @@ export interface ComposePrefill {
   textBody?: string;
 }
 
-export type ComposeMode = 'NEW' | 'REPLY' | 'REPLY_ALL' | 'FORWARD';
+export type ComposeMode = 'NEW' | 'REPLY' | 'REPLY_ALL' | 'FORWARD' | 'DRAFT';
 export type LayoutMode = 'THREE_COL' | 'ROUNDCUBE_SPLIT';
 export type ReaderThemeMode = 'SMART_DARK' | 'LIGHT_PAPER';

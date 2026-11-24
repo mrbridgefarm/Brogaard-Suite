@@ -5,6 +5,7 @@ import {
   Reply,
   ReplyAll,
   Forward,
+  Pencil,
   Trash2,
   Star,
   MailOpen,
@@ -336,8 +337,24 @@ function downloadIcsInvite() {
       >
         <div class="flex items-center gap-1.5">
           <button
+            v-if="store.isDraftMessage(msg)"
             type="button"
-            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg dav-theme-btn text-xs font-semibold transition"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow transition"
+            title="Fortsæt med at skrive på denne kladde"
+            @click="store.editDraftMessage(msg)"
+          >
+            <Pencil class="w-3.5 h-3.5" />
+            <span>Redigér kladde</span>
+          </button>
+
+          <button
+            type="button"
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition"
+            :class="
+              store.isDraftMessage(msg)
+                ? 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium'
+                : 'dav-theme-btn'
+            "
             title="Besvar"
             @click="store.openComposeModal('REPLY', msg)"
           >
@@ -518,6 +535,39 @@ function downloadIcsInvite() {
             <span class="text-slate-400 break-all">
               {{ formatAddressList(msg.cc) }}
             </span>
+          </div>
+          <div v-if="msg.bcc && msg.bcc.length > 0" class="flex items-baseline gap-2">
+            <span class="text-slate-500 font-medium w-10 shrink-0">Bcc:</span>
+            <span class="text-slate-400 break-all">
+              {{ formatAddressList(msg.bcc) }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Kladde-handlingsbjælke -->
+        <div
+          v-if="store.isDraftMessage(msg)"
+          class="px-3.5 py-2 rounded-xl bg-amber-500/15 border border-amber-400/35 flex flex-wrap items-center justify-between gap-2 text-xs"
+        >
+          <span class="flex items-center gap-2 text-amber-200 font-medium">
+            <Pencil class="w-3.5 h-3.5 text-amber-300 shrink-0" />
+            <span>Dette er en gemt kladde — du kan fortsætte med at redigere og sende den.</span>
+          </span>
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              class="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] transition"
+              @click="store.editDraftMessage(msg)"
+            >
+              Fortsæt redigering
+            </button>
+            <button
+              type="button"
+              class="px-2.5 py-1 rounded-lg bg-black/25 hover:bg-rose-500/25 border border-white/15 hover:border-rose-400/40 text-slate-200 hover:text-rose-200 font-medium text-[11px] transition"
+              @click="store.deleteSelectedMessages([msg], $event.shiftKey)"
+            >
+              Kassér
+            </button>
           </div>
         </div>
 

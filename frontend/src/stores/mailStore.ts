@@ -230,6 +230,13 @@ export const useMailStore = defineStore('mail', () => {
     return folders.value.find((f) => f.path === folderPath)?.name || folderPath;
   }
 
+  function isDraftMessage(msg?: MailHeader | MailDetail | null): boolean {
+    if (!msg) return false;
+    if (msg.draft) return true;
+    const folderObj = folders.value.find((f) => f.path === msg.folder);
+    return folderObj?.specialUse === 'drafts';
+  }
+
   const searchResults = computed<MailHeader[]>(() => {
     if (!searchQuery.value.trim()) return [];
     return filteredMessages.value.slice(0, 12);
@@ -1107,6 +1114,39 @@ export const useMailStore = defineStore('mail', () => {
     isComposeModalOpen.value = true;
   }
 
+  async function editDraftMessage(msg: MailHeader | MailDetail) {
+    if (
+      activeMessageDetail.value &&
+      activeMessageDetail.value.folder === msg.folder &&
+      activeMessageDetail.value.uid === msg.uid
+    ) {
+      openComposeModal('DRAFT', activeMessageDetail.value);
+      return;
+    }
+
+    await openMessage(msg, false);
+    if (
+      activeMessageDetail.value &&
+      activeMessageDetail.value.folder === msg.folder &&
+      activeMessageDetail.value.uid === msg.uid
+    ) {
+      openComposeModal('DRAFT', activeMessageDetail.value);
+    }
+  }
+
+  async function purgeReplacedDraftLocally(replaceDraft?: { folder: string; uid: number }) {
+    if (!replaceDraft?.folder || !replaceDraft?.uid) return;
+    const oldId = `${replaceDraft.folder}::${replaceDraft.uid}`;
+    messages.value = messages.value.filter((m) => m.id !== oldId);
+    selectedMessageIds.value = selectedMessageIds.value.filter((id) => id !== oldId);
+    if (activeMessageId.value === oldId) {
+      activeMessageId.value = null;
+      activeMessageDetail.value = null;
+    }
+    await db.mailHeaders.delete(oldId).catch(() => {});
+    await db.mailDetails.delete(oldId).catch(() => {});
+  }
+
   async function sendMail(params: {
     fromEmail: string;
     fromName?: string;
@@ -1121,6 +1161,7 @@ export const useMailStore = defineStore('mail', () => {
     references?: string[];
     replyFolder?: string;
     replyUid?: number;
+    replaceDraft?: { folder: string; uid: number };
     attachments?: Array<{
       filename: string;
       contentType: string;
@@ -1133,6 +1174,7 @@ export const useMailStore = defineStore('mail', () => {
       if (res.aliases) {
         syncLocalAliasesCache(username.value, res.aliases);
       }
+      await purgeReplacedDraftLocally(params.replaceDraft);
       isComposeModalOpen.value = false;
       notify('E-mail sendt', `Sendt fra ${params.fromEmail} til ${params.to.join(', ')}`, 'success');
       void syncWithServer(true);
@@ -1154,6 +1196,9 @@ export const useMailStore = defineStore('mail', () => {
     subject: string;
     textBody: string;
     htmlBody?: string;
+    inReplyTo?: string;
+    references?: string[];
+    replaceDraft?: { folder: string; uid: number };
     attachments?: Array<{
       filename: string;
       contentType: string;
@@ -1163,6 +1208,7 @@ export const useMailStore = defineStore('mail', () => {
     isSendingMail.value = true;
     try {
       await saveDraftApi(params);
+      await purgeReplacedDraftLocally(params.replaceDraft);
       isComposeModalOpen.value = false;
       notify('Kladde gemt', 'E-mailen blev gemt i mappen Kladder på IMAP-serveren.', 'info');
       void syncWithServer(true);
@@ -1325,6 +1371,7 @@ export const useMailStore = defineStore('mail', () => {
     searchQuery,
     isGlobalSearchActive,
     getFolderDisplayName,
+    isDraftMessage,
     filterMode,
     filteredMessages,
     searchResults,
@@ -1375,6 +1422,7 @@ export const useMailStore = defineStore('mail', () => {
     removeAlias,
     syncAliasesFromMailcow,
     openComposeModal,
+    editDraftMessage,
     sendMail,
     saveDraft,
     openMessageContextMenu,

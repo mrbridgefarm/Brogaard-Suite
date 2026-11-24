@@ -36,6 +36,7 @@ export interface MailAttachmentDTO {
   size: number;
   cid?: string;
   isInline: boolean;
+  contentBase64?: string;
 }
 
 export interface MailHeaderDTO {
@@ -56,6 +57,7 @@ export interface MailHeaderDTO {
 }
 
 export interface MailDetailDTO extends MailHeaderDTO {
+  bcc: MailAddressDTO[];
   replyTo: MailAddressDTO[];
   inReplyTo?: string;
   references: string[];
@@ -614,6 +616,8 @@ export async function fetchMessageDetail(
       }
 
       const flags = msg.flags || new Set<string>();
+      const isDraftMsg =
+        flags.has('\\Draft') || detectSpecialUse(folderPath, folderPath, undefined) === 'drafts';
       let isSeen = flags.has('\\Seen');
 
       if (markSeen && !isSeen) {
@@ -658,7 +662,10 @@ export async function fetchMessageDetail(
           contentType: att.contentType || 'application/octet-stream',
           size: Number(att.size || att.content?.length || 0),
           cid: att.cid,
-          isInline
+          isInline,
+          ...(isDraftMsg && !isInline && att.content && att.content.length <= 15 * 1024 * 1024
+            ? { contentBase64: att.content.toString('base64') }
+            : {})
         });
       }
 
@@ -705,6 +712,9 @@ export async function fetchMessageDetail(
         cc: extractParsedAddresses(parsed.cc).length
           ? extractParsedAddresses(parsed.cc)
           : mapEnvelopeAddress(env.cc),
+        bcc: extractParsedAddresses(parsed.bcc).length
+          ? extractParsedAddresses(parsed.bcc)
+          : mapEnvelopeAddress(env.bcc),
         replyTo: extractParsedAddresses(parsed.replyTo),
         inReplyTo: typeof parsed.inReplyTo === 'string' ? parsed.inReplyTo : undefined,
         references,
@@ -1022,7 +1032,8 @@ async function buildRawMimeBuffer(options: nodemailer.SendMailOptions): Promise<
 export async function sendEmailViaSmtp(
   creds: MailServerCredentials,
   payload: SendMailPayload,
-  replyMeta?: { folder: string; uid: number }
+  replyMeta?: { folder: string; uid: number },
+  replaceDraft?: { folder: string; uid: number }
 ): Promise<{ messageId: string }> {
   const allowInsecure = process.env.ALLOW_INSECURE_TLS === 'true';
 
@@ -1042,22 +1053,27 @@ export async function sendEmailViaSmtp(
   const mailOptions = buildMailOptions(payload);
   const info = await transporter.sendMail(mailOptions);
 
-  // Gem en kopi i IMAP "Sendt"-mappen og sæt evt. \Answered flag på originalbeskeden
-  if (payload.saveToSent !== false) {
+  // Gem en kopi i IMAP "Sendt"-mappen, sæt evt. \Answered flag og fjern evt. afsendt kladde fra "Kladder"
+  if (payload.saveToSent !== false || (replaceDraft?.folder && replaceDraft?.uid)) {
     try {
-      const rawBuffer = await buildRawMimeBuffer({
-        ...mailOptions,
-        messageId: info.messageId,
-        date: new Date()
-      });
+      const rawBuffer =
+        payload.saveToSent !== false
+          ? await buildRawMimeBuffer({
+              ...mailOptions,
+              messageId: info.messageId,
+              date: new Date()
+            })
+          : null;
 
       await withImap(creds, async (client) => {
-        const list = await client.list();
-        const sentBox = list.find(
-          (b) => detectSpecialUse(b.path, b.name, b.specialUse) === 'sent'
-        );
-        if (sentBox) {
-          await client.append(sentBox.path, rawBuffer, ['\\Seen']);
+        if (rawBuffer) {
+          const list = await client.list();
+          const sentBox = list.find(
+            (b) => detectSpecialUse(b.path, b.name, b.specialUse) === 'sent'
+          );
+          if (sentBox) {
+            await client.append(sentBox.path, rawBuffer, ['\\Seen']);
+          }
         }
         if (replyMeta?.folder && replyMeta?.uid) {
           const lock = await client.getMailboxLock(replyMeta.folder);
@@ -1067,10 +1083,22 @@ export async function sendEmailViaSmtp(
             lock.release();
           }
         }
+        if (replaceDraft?.folder && replaceDraft?.uid) {
+          try {
+            const draftLock = await client.getMailboxLock(replaceDraft.folder);
+            try {
+              await client.messageDelete(String(replaceDraft.uid), { uid: true });
+            } finally {
+              draftLock.release();
+            }
+          } catch {
+            // Ignorér hvis kladden allerede var slettet
+          }
+        }
       });
     } catch (err) {
       // Mails på visse servere (f.eks. Gmail/Exchange) gemmer selv i Sendt automatisk, så vi fejler ikke hvis APPEND afvises
-      console.warn('Kunne ikke appende kopi til Sendt-mappen:', (err as any)?.message || err);
+      console.warn('Kunne ikke opdatere IMAP efter afsendelse:', (err as any)?.message || err);
     }
   }
 
@@ -1078,11 +1106,12 @@ export async function sendEmailViaSmtp(
 }
 
 /**
- * Gemmer en kladde i IMAP "Kladder"-mappen (Drafts).
+ * Gemmer en kladde i IMAP "Kladder"-mappen (Drafts) og erstatter evt. den tidligere kladde-version.
  */
 export async function saveDraftToImap(
   creds: MailServerCredentials,
-  payload: SendMailPayload
+  payload: SendMailPayload,
+  replaceDraft?: { folder: string; uid: number }
 ): Promise<{ folder: string }> {
   const mailOptions = buildMailOptions(payload);
   const rawBuffer = await buildRawMimeBuffer({
@@ -1104,6 +1133,20 @@ export async function saveDraftToImap(
       }
     }
     await client.append(targetPath, rawBuffer, ['\\Seen', '\\Draft']);
+
+    if (replaceDraft?.folder && replaceDraft?.uid) {
+      try {
+        const lock = await client.getMailboxLock(replaceDraft.folder);
+        try {
+          await client.messageDelete(String(replaceDraft.uid), { uid: true });
+        } finally {
+          lock.release();
+        }
+      } catch {
+        // Ignorér hvis den gamle kladde allerede er slettet
+      }
+    }
+
     return { folder: targetPath };
   });
 }

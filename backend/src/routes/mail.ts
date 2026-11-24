@@ -337,7 +337,15 @@ mailRouter.post('/send', sendMailLimiter, async (req: Request, res: Response) =>
         ? { folder: String(req.body.replyFolder), uid: Number(req.body.replyUid) }
         : undefined;
 
-    const sent = await sendEmailViaSmtp(creds, payload, replyMeta);
+    const replaceDraft =
+      req.body?.replaceDraft?.folder && Number(req.body?.replaceDraft?.uid) > 0
+        ? {
+            folder: String(req.body.replaceDraft.folder).trim(),
+            uid: Number(req.body.replaceDraft.uid)
+          }
+        : undefined;
+
+    const sent = await sendEmailViaSmtp(creds, payload, replyMeta, replaceDraft);
 
     let aliases = getAliasesForUser(creds.username);
     if (saveAlias && fromEmail.includes('@')) {
@@ -380,10 +388,20 @@ mailRouter.post('/drafts', async (req: Request, res: Response) => {
       subject: String(req.body?.subject || '(Kladde uden emne)').trim(),
       textBody: String(req.body?.textBody || ''),
       htmlBody: req.body?.htmlBody ? String(req.body.htmlBody) : undefined,
+      inReplyTo: req.body?.inReplyTo ? String(req.body.inReplyTo) : undefined,
+      references: Array.isArray(req.body?.references) ? req.body.references.map(String) : undefined,
       attachments: Array.isArray(req.body?.attachments) ? req.body.attachments : []
     };
 
-    const saved = await saveDraftToImap(creds, payload);
+    const replaceDraft =
+      req.body?.replaceDraft?.folder && Number(req.body?.replaceDraft?.uid) > 0
+        ? {
+            folder: String(req.body.replaceDraft.folder).trim(),
+            uid: Number(req.body.replaceDraft.uid)
+          }
+        : undefined;
+
+    const saved = await saveDraftToImap(creds, payload, replaceDraft);
     res.json({ ok: true, folder: saved.folder });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke gemme kladden på IMAP-serveren.' });

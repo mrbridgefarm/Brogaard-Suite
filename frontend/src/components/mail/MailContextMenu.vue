@@ -4,6 +4,7 @@ import {
   Reply,
   ReplyAll,
   Forward,
+  Pencil,
   Copy,
   Scissors,
   ClipboardPaste,
@@ -35,6 +36,13 @@ const selectedMessages = computed(() => {
 const otherFolders = computed(() =>
   store.folders.filter((f) => f.path !== store.activeFolderPath)
 );
+
+async function handleEditDraft() {
+  const target = store.contextMenu.targetMessage || selectedMessages.value[0];
+  store.closeContextMenu();
+  if (!target) return;
+  await store.editDraftMessage(target);
+}
 
 async function handleReply(mode: 'REPLY' | 'REPLY_ALL' | 'FORWARD') {
   const target = store.contextMenu.targetMessage || selectedMessages.value[0];
@@ -78,6 +86,17 @@ function handleCreateCalendarEvent() {
         <div class="px-3 py-1.5 border-b border-slate-800 text-[11px] font-semibold text-slate-400 truncate">
           {{ selectedMessages.length > 1 ? `${selectedMessages.length} e-mails valgt` : store.contextMenu.targetMessage.subject }}
         </div>
+
+        <button
+          v-if="store.isDraftMessage(store.contextMenu.targetMessage)"
+          type="button"
+          class="w-full px-3 py-1.5 hover:bg-amber-500/20 text-amber-200 font-semibold flex items-center justify-between border-b border-slate-800"
+          @click="handleEditDraft"
+        >
+          <span class="flex items-center gap-2">
+            <Pencil class="w-3.5 h-3.5 text-amber-400" /> Redigér kladde...
+          </span>
+        </button>
 
         <button
           type="button"
