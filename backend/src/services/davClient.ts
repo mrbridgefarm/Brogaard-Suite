@@ -460,9 +460,10 @@ async function fetchCalendarsDirectPropfind(
     const okXml = extractOkPropstatXml(block);
     const resourceTypeXml = extractTagInnerXml(okXml, 'resourcetype') || '';
 
-    // Skal have et <calendar/> eller <C:calendar/> tag (IKKE calendar-proxy-*)
+    // Skal have et <calendar/> eller <C:calendar/> tag (IKKE calendar-proxy-* / schedule-inbox;
+    // bemærk at SOGo altid sætter <C:schedule-outbox/> på brugerens 'personal'-kalender, og ægte /outbox/ filtreres via URL)
     const isCalendarResource = /<(?:[a-zA-Z0-9_-]+:)?calendar(?:\s|>|\/)/i.test(resourceTypeXml);
-    const isScheduleOrProxy = /schedule-inbox|schedule-outbox|calendar-proxy|vevent-collection-only-false/i.test(
+    const isScheduleOrProxy = /schedule-inbox|calendar-proxy|vevent-collection-only-false/i.test(
       resourceTypeXml
     );
 
@@ -1319,7 +1320,7 @@ export async function verifyAndFetchSharedCalendar(
 }
 
 /**
- * Henter alle kalendere som en anden bruger (f.eks. theo@domæne.dk) har delt med den loggede bruger,
+ * Henter alle kalendere som en anden bruger (f.eks. bruger@domæne.dk) har delt med den loggede bruger,
  * via direkte PROPFIND mod ejerens /Calendar/-mappe med modtagerens eget login (virker også på tværs af domæner).
  */
 export async function fetchUserSharedCalendarsForOwner(
@@ -1338,6 +1339,7 @@ export async function fetchUserSharedCalendarsForOwner(
   }
 
   const base = ensureTrailingSlash(normalizeMailcowUrl(creds.serverUrl));
+  const origin = new URL(base).origin;
   const encodedOwner = encodeURIComponent(cleanOwner);
   const homeCandidates = [`${base}${cleanOwner}/Calendar/`];
   if (encodedOwner !== cleanOwner) {
@@ -1375,7 +1377,7 @@ export async function fetchUserSharedCalendarsForOwner(
         break;
       }
     } catch {
-      // Prøv næste kandidat eller personal-fallback
+      // Prøv næste kandidat eller fallback
     }
   }
 
@@ -1400,6 +1402,89 @@ export async function fetchUserSharedCalendarsForOwner(
       } catch {
         // Ignorer 401/403/404 for kandidater uden adgang
       }
+    }
+  }
+
+  if (discovered.size === 0) {
+    try {
+      const foldersUrl = `${origin}/SOGo/so/${encodeURIComponent(cleanOwner)}/foldersSearch?type=calendar`;
+      assertSameServerOrigin(foldersUrl, creds);
+      const auth = Buffer.from(`${creds.username}:${creds.password}`, 'utf8').toString('base64');
+      const res = await fetch(foldersUrl, {
+        method: 'GET',
+        headers: {
+          Authorization: `Basic ${auth}`,
+          Accept: 'application/json, text/plain, */*',
+          ...buildForwardedIpHeaders(creds.clientIp)
+        },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(4500)
+      });
+
+      if (res.ok) {
+        const rawText = (await readResponseTextSmart(res)).trim();
+        if (rawText && !rawText.startsWith('<')) {
+          const parsed = JSON.parse(rawText) as {
+            folders?: Array<{
+              name?: string;
+              displayName?: string;
+              owner?: string;
+              type?: string;
+            }>;
+          };
+          const folders = Array.isArray(parsed?.folders) ? parsed.folders : [];
+          await Promise.allSettled(
+            folders.map(async (f, idx) => {
+              const rawPath = String(f?.name || '').trim();
+              if (!rawPath || !rawPath.toLowerCase().startsWith('/calendar/') || rawPath.includes('..')) {
+                return;
+              }
+              const folderOwner = String(f?.owner || cleanOwner).trim() || cleanOwner;
+              if (folderOwner.toLowerCase() === normalizedUser || /[/\\?#\s]/.test(folderOwner)) {
+                return;
+              }
+              const folderDavUrl = ensureTrailingSlash(
+                `${base}${folderOwner}/${rawPath.replace(/^\/+/, '')}`
+              );
+              assertSameServerOrigin(folderDavUrl, creds);
+              if (isInternalNonCalendarUrl(folderDavUrl)) return;
+
+              try {
+                const cals = await fetchCalendarsDirectPropfind(
+                  creds,
+                  folderDavUrl,
+                  '0',
+                  { defaultShared: true, defaultOwner: folderOwner },
+                  4000
+                );
+                if (cals.length > 0) {
+                  recordCals(cals);
+                  return;
+                }
+              } catch {
+                // Fallback til metadata fra foldersSearch JSON
+              }
+
+              const fallbackColor = FALLBACK_COLORS[idx % FALLBACK_COLORS.length];
+              recordCals([
+                {
+                  id: folderDavUrl,
+                  url: folderDavUrl,
+                  name: normalizeDanishText(String(f?.displayName || '').trim()) || 'Delt kalender',
+                  color: fallbackColor,
+                  serverColor: fallbackColor,
+                  readOnly: true,
+                  isShared: true,
+                  sharePermission: 'read',
+                  owner: folderOwner
+                }
+              ]);
+            })
+          );
+        }
+      }
+    } catch {
+      // Best-effort JSON fallback
     }
   }
 

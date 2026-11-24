@@ -382,7 +382,7 @@ function removeSingleClipboardEvent(evId: string) {
               :class="addCalendarMode === 'SUBSCRIBE' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
               @click="addCalendarMode = 'SUBSCRIBE'"
             >
-              Abonnér (.ics)
+              iCal (.ics)
             </button>
             <button
               type="button"
@@ -390,14 +390,14 @@ function removeSingleClipboardEvent(evId: string) {
               :class="addCalendarMode === 'CALDAV' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
               @click="addCalendarMode = 'CALDAV'"
             >
-              Ny / CalDAV
+              Opret / DAV
             </button>
           </div>
 
           <div v-if="addCalendarMode === 'SHARED'" class="space-y-2">
             <form class="space-y-1.5" @submit.prevent="runSharedCalendarSearch">
               <div class="text-[10px] text-slate-400 leading-tight">
-                Søg på en kollegas navn eller e-mail i Mailcow/SOGo (f.eks. <code class="text-slate-300">theo</code>):
+                Søg på en kollegas navn eller e-mail i Mailcow/SOGo (f.eks. <code class="text-slate-300">bruger@domæne.dk</code>):
               </div>
 
               <div class="relative flex items-center gap-1">
@@ -405,7 +405,7 @@ function removeSingleClipboardEvent(evId: string) {
                   v-model="sharedSearchQuery"
                   type="text"
                   autocomplete="off"
-                  placeholder="Navn eller e-mail (f.eks. theo)..."
+                  placeholder="Navn eller bruger@domæne.dk..."
                   class="flex-1 min-w-0 px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
                   @focus="showSharedSuggestions = true"
                   @blur="handleSharedSearchBlur"
@@ -518,7 +518,7 @@ function removeSingleClipboardEvent(evId: string) {
               v-else-if="hasSearchedShared && !isSearchingShared"
               class="p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 text-[10.5px] text-slate-400 leading-snug"
             >
-              Ingen delte kalendere fundet. Prøv hele e-mailadressen (f.eks. <code class="text-slate-300">theo@ditdomæne.dk</code>) og tjek at ejeren har delt kalenderen med dig i SOGo.
+              Ingen delte kalendere fundet. Prøv hele e-mailadressen (f.eks. <code class="text-slate-300">bruger@domæne.dk</code>) og tjek at ejeren har delt kalenderen med dig i SOGo.
             </div>
 
             <div class="flex items-center justify-end">
