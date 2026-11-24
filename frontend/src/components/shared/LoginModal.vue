@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
+import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import {
   Globe,
   X,
+  LogIn,
   AlertCircle,
   ExternalLink,
   Mail,
@@ -20,12 +21,19 @@ const { currentTheme } = useTheme();
 const username = ref('');
 const password = ref('');
 const showPassword = ref(false);
+const isLoginBoxOpen = ref(false);
+const emailInputRef = ref<HTMLInputElement | null>(null);
 const customServerHost = ref('');
 const showCustomServerField = ref(false);
 const errorMsg = ref('');
 const now = ref(new Date());
 
 let clockTimer: ReturnType<typeof setInterval> | null = null;
+
+const isScreenVisible = computed(
+  () =>
+    suiteStore.isLoginModalOpen || (!suiteStore.isAuthenticated && !suiteStore.isPublicShareMode)
+);
 
 const greetingTitle = computed(() => {
   const hour = now.value.getHours();
@@ -42,10 +50,59 @@ const dateEyebrow = computed(() => {
   return `${weekday} · ${dayMonth}`;
 });
 
+function focusEmailField() {
+  void nextTick(() => {
+    emailInputRef.value?.focus();
+  });
+}
+
+function openLoginBox() {
+  isLoginBoxOpen.value = true;
+  focusEmailField();
+}
+
+function toggleTopRightLogin() {
+  if (isLoginBoxOpen.value) {
+    showPassword.value = false;
+    errorMsg.value = '';
+    if (canCloseModal.value) {
+      suiteStore.isLoginModalOpen = false;
+    } else {
+      isLoginBoxOpen.value = false;
+    }
+  } else {
+    openLoginBox();
+  }
+}
+
+function handleBackdropClick() {
+  if (!isLoginBoxOpen.value) return;
+  showPassword.value = false;
+  if (canCloseModal.value) {
+    suiteStore.isLoginModalOpen = false;
+  } else {
+    isLoginBoxOpen.value = false;
+  }
+}
+
+function handleGlobalKeydown(e: KeyboardEvent) {
+  if (!isScreenVisible.value) return;
+  if (!isLoginBoxOpen.value && (e.key === 'Enter' || e.key === ' ')) {
+    const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+    if (tag === 'button' || tag === 'a' || tag === 'input') return;
+    e.preventDefault();
+    openLoginBox();
+  } else if (isLoginBoxOpen.value && e.key === 'Escape') {
+    e.preventDefault();
+    handleBackdropClick();
+  }
+}
+
 onMounted(() => {
   clockTimer = setInterval(() => {
     now.value = new Date();
   }, 30000);
+  window.addEventListener('keydown', handleGlobalKeydown);
 });
 
 onUnmounted(() => {
@@ -53,17 +110,29 @@ onUnmounted(() => {
     clearInterval(clockTimer);
     clockTimer = null;
   }
+  window.removeEventListener('keydown', handleGlobalKeydown);
 });
 
 const canCloseModal = computed(() => suiteStore.isAuthenticated);
 
 watch(
-  () => [suiteStore.isLoginModalOpen, suiteStore.hasDefaultServer, suiteStore.username] as const,
-  () => {
+  () =>
+    [
+      suiteStore.isLoginModalOpen,
+      suiteStore.isAuthenticated,
+      suiteStore.hasDefaultServer,
+      suiteStore.username
+    ] as const,
+  ([modalOpen, authenticated]) => {
     if (suiteStore.username) {
       username.value = suiteStore.username;
     }
     showCustomServerField.value = !suiteStore.hasDefaultServer;
+    if (modalOpen && authenticated) {
+      openLoginBox();
+    } else if (!authenticated && !modalOpen) {
+      isLoginBoxOpen.value = false;
+    }
   },
   { immediate: true }
 );
@@ -86,15 +155,9 @@ async function handleLogin() {
     });
     password.value = '';
     showPassword.value = false;
+    isLoginBoxOpen.value = false;
   } catch (err: any) {
     errorMsg.value = err?.message || 'Kunne ikke logge ind. Kontrollér e-mail og adgangskode.';
-  }
-}
-
-function tryClose() {
-  if (canCloseModal.value) {
-    showPassword.value = false;
-    suiteStore.isLoginModalOpen = false;
   }
 }
 </script>
@@ -102,92 +165,77 @@ function tryClose() {
 <template>
   <Teleport to="body">
     <div
-      v-if="suiteStore.isLoginModalOpen || (!suiteStore.isAuthenticated && !suiteStore.isPublicShareMode)"
-      class="fixed inset-0 z-50 flex flex-col justify-center overflow-y-auto bg-slate-950"
-      @click.self="tryClose"
+      v-if="isScreenVisible"
+      class="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-slate-950"
+      @click.self="handleBackdropClick"
     >
       <!-- Baggrundsbillede + stemningsfuld vignette -->
       <div
         v-if="currentTheme.wallpaper"
-        class="fixed inset-0 z-0 pointer-events-none bg-cover bg-center transition-all duration-700"
+        class="fixed inset-0 z-0 pointer-events-none bg-cover bg-center transition-transform duration-700 ease-out"
+        :class="isLoginBoxOpen ? 'scale-[1.02]' : 'scale-100'"
         :style="{ backgroundImage: `url(${currentTheme.wallpaper})` }"
       ></div>
       <div
-        class="fixed inset-0 z-0 pointer-events-none transition-all duration-500"
+        class="fixed inset-0 z-0 pointer-events-none transition-opacity duration-500"
+        :class="isLoginBoxOpen ? 'opacity-100' : 'opacity-65'"
         :style="{ background: currentTheme.loginOverlay }"
       ></div>
 
-      <!-- Diskret luk-knap hvis modal åbnes mens brugeren allerede er logget ind -->
+      <!-- Diskret glas-knap i øverste højre hjørne til at åbne/lukke login-boksen -->
       <button
-        v-if="canCloseModal"
         type="button"
-        class="fixed top-5 right-6 z-20 p-2 rounded-xl bg-black/35 hover:bg-black/55 border border-white/15 text-white/80 hover:text-white backdrop-blur-md transition"
-        title="Luk"
-        @click="tryClose"
+        :aria-label="isLoginBoxOpen ? 'Skjul loginboks' : 'Åbn login'"
+        :aria-expanded="isLoginBoxOpen"
+        :title="isLoginBoxOpen ? 'Skjul loginboks (Esc)' : 'Log ind'"
+        class="group fixed top-6 right-6 z-30 flex items-center justify-center w-11 h-11 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/25 hover:border-white/45 text-white/90 hover:text-white backdrop-blur-xl shadow-[0_10px_28px_-6px_rgba(0,0,0,0.5)] transition-all duration-300 cursor-pointer focus:outline-none focus:border-white/60"
+        @click="toggleTopRightLogin"
       >
-        <X class="w-4 h-4" />
+        <span
+          aria-hidden="true"
+          class="pointer-events-none absolute inset-x-2 top-0 h-px bg-gradient-to-r from-transparent via-white/65 to-transparent"
+        ></span>
+        <X
+          v-if="isLoginBoxOpen"
+          class="w-[18px] h-[18px] transition-transform duration-300 group-hover:rotate-90"
+        />
+        <LogIn
+          v-else
+          class="w-[18px] h-[18px] transition-transform duration-300 group-hover:translate-x-0.5"
+        />
       </button>
 
-      <!-- Centreret branding + frostet krystalglas-panel -->
-      <main class="relative z-10 px-4 py-10 flex flex-col items-center justify-center my-auto">
-        <!-- Elegant centreret Brogaard Suite signatur -->
-        <div class="mb-6 flex flex-col items-center select-none">
-          <div
-            class="relative flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-white/20 via-white/10 to-white/5 backdrop-blur-xl border border-white/25 shadow-[0_12px_32px_-6px_rgba(0,0,0,0.5)]"
+      <!-- Stor, ren Brogaard Suite-signatur placeret højt i billedet (uden ikon) -->
+      <header
+        class="relative z-10 pt-12 sm:pt-16 pb-4 px-6 flex items-center justify-center select-none pointer-events-none shrink-0"
+      >
+        <div class="flex items-center gap-4 sm:gap-6">
+          <span
+            aria-hidden="true"
+            class="h-px w-10 sm:w-20 bg-gradient-to-r from-transparent via-white/35 to-white/60"
+          ></span>
+          <span
+            class="text-xl sm:text-3xl tracking-[0.28em] uppercase text-white drop-shadow-[0_2px_16px_rgba(0,0,0,0.45)]"
           >
-            <span
-              aria-hidden="true"
-              class="pointer-events-none absolute inset-x-2 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent"
-            ></span>
-            <svg
-              class="w-6 h-6 drop-shadow"
-              viewBox="0 0 32 32"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <rect
-                x="4"
-                y="6.5"
-                width="24"
-                height="19"
-                rx="4.5"
-                stroke="white"
-                stroke-opacity="0.92"
-                stroke-width="1.75"
-              />
-              <path
-                d="M5.5 9L16 17L26.5 9"
-                stroke="white"
-                stroke-opacity="0.95"
-                stroke-width="1.75"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-              <circle cx="11.5" cy="21.5" r="1.4" fill="#7dd3fc" />
-              <circle cx="16" cy="21.5" r="1.4" fill="#a5b4fc" />
-              <circle cx="20.5" cy="21.5" r="1.4" fill="#6ee7b7" />
-            </svg>
-          </div>
-
-          <div class="mt-3.5 flex items-center gap-3">
-            <span
-              aria-hidden="true"
-              class="h-px w-8 bg-gradient-to-r from-transparent to-white/40"
-            ></span>
-            <span class="text-[14px] tracking-[0.24em] uppercase text-white/95 drop-shadow">
-              <span class="font-semibold">Brogaard</span>
-              <span class="font-light text-sky-200/90 ml-1.5">Suite</span>
-            </span>
-            <span
-              aria-hidden="true"
-              class="h-px w-8 bg-gradient-to-l from-transparent to-white/40"
-            ></span>
-          </div>
+            <span class="font-semibold">Brogaard</span>
+            <span class="font-extralight text-sky-200/95 ml-2.5 sm:ml-3.5">Suite</span>
+          </span>
+          <span
+            aria-hidden="true"
+            class="h-px w-10 sm:w-20 bg-gradient-to-l from-transparent via-white/35 to-white/60"
+          ></span>
         </div>
+      </header>
 
-        <div
-          class="dav-login-card relative overflow-hidden w-full max-w-[400px] rounded-2xl px-7 py-8 shadow-2xl border transition-all duration-300"
+      <!-- Centreret frostet krystalglas-panel (vises ved klik på login-ikonet øverst til højre) -->
+      <main
+        class="relative z-10 flex-1 px-4 pb-12 flex items-center justify-center"
+        @click.self="handleBackdropClick"
+      >
+        <Transition name="suite-login-reveal">
+          <div
+            v-if="isLoginBoxOpen"
+            class="dav-login-card relative overflow-hidden w-full max-w-[400px] rounded-2xl px-7 py-8 shadow-2xl border transition-all duration-300"
           :class="
             currentTheme.wallpaper
               ? 'backdrop-blur-md backdrop-saturate-150 border-white/25'
@@ -259,6 +307,7 @@ function tryClose() {
                 </label>
                 <input
                   id="suite-login-email"
+                  ref="emailInputRef"
                   v-model="username"
                   type="email"
                   name="username"
@@ -345,7 +394,8 @@ function tryClose() {
               </a>
             </div>
           </div>
-        </div>
+          </div>
+        </Transition>
       </main>
     </div>
   </Teleport>
@@ -356,5 +406,22 @@ function tryClose() {
 .suite-pwd-input::-ms-reveal,
 .suite-pwd-input::-ms-clear {
   display: none;
+}
+
+/* Blød glas-animation når login-boksen åbnes og skjules */
+.suite-login-reveal-enter-active {
+  transition:
+    opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.suite-login-reveal-leave-active {
+  transition:
+    opacity 0.2s ease-in,
+    transform 0.2s ease-in;
+}
+.suite-login-reveal-enter-from,
+.suite-login-reveal-leave-to {
+  opacity: 0;
+  transform: translateY(12px) scale(0.96);
 }
 </style>
