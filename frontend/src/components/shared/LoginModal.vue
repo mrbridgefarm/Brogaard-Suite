@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
-import { Globe, X, AlertCircle, ExternalLink } from 'lucide-vue-next';
+import {
+  Globe,
+  X,
+  AlertCircle,
+  ExternalLink,
+  Mail,
+  Calendar,
+  Users,
+  Eye,
+  EyeOff
+} from 'lucide-vue-next';
 import { useSuiteStore } from '../../stores/suiteStore';
 import { useTheme } from '../../composables/useTheme';
 import ThemePicker from './ThemePicker.vue';
@@ -10,6 +20,7 @@ const { currentTheme } = useTheme();
 
 const username = ref('');
 const password = ref('');
+const showPassword = ref(false);
 const customServerHost = ref('');
 const showCustomServerField = ref(false);
 const errorMsg = ref('');
@@ -31,6 +42,21 @@ const clockLabel = computed(() => {
   const mm = String(dt.getMinutes()).padStart(2, '0');
   const week = getIsoWeekNumber(dt);
   return `${hh}:${mm} · Uge ${week}`;
+});
+
+const greetingTitle = computed(() => {
+  const hour = now.value.getHours();
+  if (hour >= 5 && hour < 10) return 'Godmorgen';
+  if (hour >= 10 && hour < 12) return 'God formiddag';
+  if (hour >= 12 && hour < 18) return 'God eftermiddag';
+  return 'Godaften';
+});
+
+const dateEyebrow = computed(() => {
+  const dt = now.value;
+  const weekday = dt.toLocaleDateString('da-DK', { weekday: 'long' }).replace(/\.$/, '');
+  const dayMonth = dt.toLocaleDateString('da-DK', { day: 'numeric', month: 'long' });
+  return `${weekday} · ${dayMonth}`;
 });
 
 onMounted(() => {
@@ -76,6 +102,7 @@ async function handleLogin() {
       serverHost: effectiveCustomHost || undefined
     });
     password.value = '';
+    showPassword.value = false;
   } catch (err: any) {
     errorMsg.value = err?.message || 'Kunne ikke logge ind. Kontrollér e-mail og adgangskode.';
   }
@@ -83,6 +110,7 @@ async function handleLogin() {
 
 function tryClose() {
   if (canCloseModal.value) {
+    showPassword.value = false;
     suiteStore.isLoginModalOpen = false;
   }
 }
@@ -154,12 +182,37 @@ function tryClose() {
 
           <div class="relative z-10">
             <div class="text-center">
-              <h1 class="text-2xl font-bold text-white tracking-tight drop-shadow">
-                Velkommen tilbage
-              </h1>
-              <p class="text-xs text-slate-200/90 mt-1 drop-shadow-sm">
-                Log ind på Mail, Kalender &amp; Kontakter
+              <p class="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-slate-200/75 drop-shadow-sm">
+                {{ dateEyebrow }}
               </p>
+              <h1 class="text-2xl font-bold text-white tracking-tight drop-shadow mt-1">
+                {{ greetingTitle }}
+              </h1>
+
+              <!-- Nordiske glas-badges for aktive moduler -->
+              <div class="mt-3.5 flex flex-wrap items-center justify-center gap-1.5">
+                <span
+                  v-if="suiteStore.isAnyModuleEnabled('mail')"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/15 backdrop-blur-md text-[11px] font-medium text-slate-100/95 shadow-sm"
+                >
+                  <Mail class="w-3 h-3 text-sky-300/95 shrink-0" />
+                  <span>Mail</span>
+                </span>
+                <span
+                  v-if="suiteStore.isAnyModuleEnabled('calendar')"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/15 backdrop-blur-md text-[11px] font-medium text-slate-100/95 shadow-sm"
+                >
+                  <Calendar class="w-3 h-3 text-indigo-300/95 shrink-0" />
+                  <span>Kalender</span>
+                </span>
+                <span
+                  v-if="suiteStore.isAnyModuleEnabled('contacts')"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/15 backdrop-blur-md text-[11px] font-medium text-slate-100/95 shadow-sm"
+                >
+                  <Users class="w-3 h-3 text-emerald-300/95 shrink-0" />
+                  <span>Kontakter</span>
+                </span>
+              </div>
             </div>
 
             <form class="mt-6 space-y-4 text-xs" @submit.prevent="handleLogin">
@@ -172,25 +225,35 @@ function tryClose() {
               </div>
 
               <div>
-                <label class="block text-slate-100 font-medium text-[12px] mb-1.5 drop-shadow-sm">
+                <label
+                  for="suite-login-email"
+                  class="block text-slate-100 font-medium text-[12px] mb-1.5 drop-shadow-sm"
+                >
                   E-mailadresse
                 </label>
                 <input
+                  id="suite-login-email"
                   v-model="username"
                   type="email"
+                  name="username"
+                  autocomplete="username"
                   required
                   autofocus
-                  placeholder="Indtast mailadresse"
-                  class="w-full px-3.5 py-2.5 bg-black/20 backdrop-blur-sm border border-white/20 rounded-xl text-sm text-white placeholder-slate-200/70 focus:outline-none focus:bg-black/30 focus:border-white/45 transition"
+                  placeholder="bruger@domæne.dk"
+                  class="w-full px-3.5 py-2.5 bg-black/20 backdrop-blur-sm border border-white/20 rounded-xl text-sm text-white placeholder-slate-200/65 focus:outline-none focus:bg-black/30 focus:border-white/45 transition"
                 />
               </div>
 
               <!-- Vises kun hvis DEFAULT_MAIL_HOST ikke er konfigureret i .env -->
               <div v-if="showCustomServerField" class="p-3 rounded-xl bg-black/20 backdrop-blur-sm border border-white/15 space-y-1.5">
-                <label class="flex items-center gap-1.5 text-slate-100 font-medium">
+                <label
+                  for="suite-login-server"
+                  class="flex items-center gap-1.5 text-slate-100 font-medium"
+                >
                   <Globe class="w-3.5 h-3.5 opacity-80" /> Mailcow Server (IMAP, SMTP &amp; DAV vært)
                 </label>
                 <input
+                  id="suite-login-server"
                   v-model="customServerHost"
                   type="text"
                   required
@@ -200,16 +263,35 @@ function tryClose() {
               </div>
 
               <div>
-                <label class="block text-slate-100 font-medium text-[12px] mb-1.5 drop-shadow-sm">
+                <label
+                  for="suite-login-password"
+                  class="block text-slate-100 font-medium text-[12px] mb-1.5 drop-shadow-sm"
+                >
                   Adgangskode
                 </label>
-                <input
-                  v-model="password"
-                  type="password"
-                  required
-                  placeholder="••••••••••••••••"
-                  class="w-full px-3.5 py-2.5 bg-black/20 backdrop-blur-sm border border-white/20 rounded-xl text-sm text-white placeholder-slate-200/70 focus:outline-none focus:bg-black/30 focus:border-white/45 transition"
-                />
+                <div class="relative">
+                  <input
+                    id="suite-login-password"
+                    v-model="password"
+                    :type="showPassword ? 'text' : 'password'"
+                    name="password"
+                    autocomplete="current-password"
+                    required
+                    placeholder="••••••••••••••••"
+                    class="suite-pwd-input w-full pl-3.5 pr-10 py-2.5 bg-black/20 backdrop-blur-sm border border-white/20 rounded-xl text-sm text-white placeholder-slate-200/70 focus:outline-none focus:bg-black/30 focus:border-white/45 transition"
+                  />
+                  <button
+                    type="button"
+                    :aria-label="showPassword ? 'Skjul adgangskode' : 'Vis adgangskode'"
+                    :aria-pressed="showPassword"
+                    :title="showPassword ? 'Skjul adgangskode' : 'Vis adgangskode'"
+                    class="absolute inset-y-0 right-0 px-3 flex items-center text-slate-200/70 hover:text-white focus:outline-none transition"
+                    @click="showPassword = !showPassword"
+                  >
+                    <EyeOff v-if="showPassword" class="w-4 h-4" />
+                    <Eye v-else class="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               <button
@@ -244,3 +326,11 @@ function tryClose() {
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+/* Skjul Edge/Windows indbyggede password-øje så der ikke vises to ikoner samtidig */
+.suite-pwd-input::-ms-reveal,
+.suite-pwd-input::-ms-clear {
+  display: none;
+}
+</style>
