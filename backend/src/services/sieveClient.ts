@@ -64,7 +64,7 @@ class ManageSieveClient {
     private allowInsecureTls: boolean
   ) {}
 
-  async connect(username: string, password: string): Promise<void> {
+  async connect(username: string, password: string, clientIp?: string): Promise<void> {
     const rawSocket = await new Promise<net.Socket>((resolve, reject) => {
       const s = net.createConnection({ host: this.host, port: this.port });
       const timer = setTimeout(() => {
@@ -90,6 +90,8 @@ class ManageSieveClient {
     const supportsStartTls = greeting.lines.some((l) =>
       l.toUpperCase().includes('"STARTTLS"')
     );
+
+    let capabilityLines: string[] = greeting.lines;
 
     if (supportsStartTls) {
       const tlsResp = await this.sendCommand('STARTTLS');
@@ -117,8 +119,23 @@ class ManageSieveClient {
       // Dovecot/Pigeonhole sender ofte nye capabilities automatisk efter STARTTLS, eller svarer på CAPABILITY
       // Vi venter kortvarigt på om serveren sender en ny OK greeting efter TLS handshake
       const postTls = await this.waitForResponseWithTimeout(600);
-      if (!postTls) {
-        await this.sendCommand('CAPABILITY');
+      if (postTls) {
+        capabilityLines = postTls.lines;
+      } else {
+        const capResp = await this.sendCommand('CAPABILITY');
+        capabilityLines = capResp.lines;
+      }
+    }
+
+    // Videregiv brugerens rigtige IP til Dovecot (kræver login_trusted_networks med Suite-serverens IP).
+    // Dovecot annoncerer kun XCLIENT for betroede forbindelser, så ellers springes dette over.
+    const cleanIp = (clientIp || '').trim().replace(/^::ffff:/i, '');
+    const supportsXclient = capabilityLines.some((l) => l.toUpperCase().includes('"XCLIENT"'));
+    if (cleanIp && net.isIP(cleanIp) !== 0 && supportsXclient) {
+      try {
+        await this.sendCommand(`XCLIENT ADDR=${cleanIp}`);
+      } catch {
+        // Ignorér – login fortsætter med serverens egen IP
       }
     }
 
@@ -601,7 +618,7 @@ export async function fetchSieveOverview(creds: MailServerCredentials): Promise<
   const client = new ManageSieveClient(host, port, allowInsecure);
 
   try {
-    await client.connect(creds.username, creds.password);
+    await client.connect(creds.username, creds.password, creds.clientIp);
     const { scripts, activeScriptName } = await client.listScripts();
 
     // Hvis der er et aktivt script (f.eks. "sogo" i Mailcow/SOGo eller "roundcube" eller "imap-sync"), hentes det
@@ -646,7 +663,7 @@ export async function fetchSpecificSieveScript(
   const client = new ManageSieveClient(host, port, allowInsecure);
 
   try {
-    await client.connect(creds.username, creds.password);
+    await client.connect(creds.username, creds.password, creds.clientIp);
     const rawScript = await client.getScript(scriptName);
     const parsed = parseSieveScriptToRules(rawScript);
     return {
@@ -676,7 +693,7 @@ export async function saveSieveRulesOrScript(
   const client = new ManageSieveClient(host, port, allowInsecure);
 
   try {
-    await client.connect(creds.username, creds.password);
+    await client.connect(creds.username, creds.password, creds.clientIp);
     const { activeScriptName } = await client.listScripts();
 
     // Bevar eksisterende scriptnavn (f.eks. "sogo" på Mailcow), så reglerne også er synlige i SOGo!

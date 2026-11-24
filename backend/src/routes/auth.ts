@@ -134,6 +134,14 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
     // Primær autentificering mod IMAP
     const folders = await fetchMailFolders(mailCreds);
 
+    const rawXff = req.headers['x-forwarded-for'];
+    console.log(
+      `[Auth] Suite login OK for ${username} – klient-IP: ${clientIp || 'ukendt'} ` +
+        `(socket: ${req.socket?.remoteAddress || '?'}, x-forwarded-for: ${
+          (Array.isArray(rawXff) ? rawXff.join(',') : rawXff) || '-'
+        })`
+    );
+
     // Sæt den fælles krypterede SSO-cookie
     setSessionCookie(req, res, {
       ...mailCreds,
