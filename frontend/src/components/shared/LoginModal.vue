@@ -3,6 +3,7 @@ import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import {
   Globe,
   X,
+  LogIn,
   AlertCircle,
   ExternalLink,
   Mail,
@@ -68,6 +69,14 @@ function closeLoginBox() {
     suiteStore.isLoginModalOpen = false;
   } else {
     isLoginBoxOpen.value = false;
+  }
+}
+
+function toggleTopRightLogin() {
+  if (isLoginBoxOpen.value) {
+    closeLoginBox();
+  } else {
+    openLoginBox();
   }
 }
 
@@ -172,11 +181,34 @@ async function handleLogin() {
         :style="{ background: currentTheme.loginOverlay }"
       ></div>
 
-      <!-- Stor, ren Brogaard Suite-signatur højt i billedet + krystalglas LOG IND-knap lige under -->
-      <header
-        class="relative z-20 pt-12 sm:pt-16 pb-4 px-6 flex flex-col items-center justify-center select-none shrink-0"
+      <!-- Tydelig, frostet Log ind-glasknap i øverste højre hjørne -->
+      <button
+        type="button"
+        :aria-label="isLoginBoxOpen ? 'Skjul loginboks' : 'Log ind'"
+        :aria-expanded="isLoginBoxOpen"
+        :title="isLoginBoxOpen ? 'Skjul loginboks (Esc)' : 'Klik for at logge ind'"
+        class="group fixed top-5 right-6 z-30 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/12 hover:bg-white/22 border border-white/25 hover:border-white/45 text-white/95 hover:text-white backdrop-blur-xl shadow-[0_10px_28px_-6px_rgba(0,0,0,0.5)] transition-all duration-300 cursor-pointer focus:outline-none focus:border-white/60 select-none"
+        @click="toggleTopRightLogin"
       >
-        <div class="flex items-center gap-4 sm:gap-6 pointer-events-none">
+        <span
+          aria-hidden="true"
+          class="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/65 to-transparent"
+        ></span>
+        <template v-if="isLoginBoxOpen">
+          <X class="w-4 h-4 text-slate-200 group-hover:text-white transition-transform duration-300 group-hover:rotate-90" />
+          <span class="text-xs font-medium tracking-wide">Luk</span>
+        </template>
+        <template v-else>
+          <LogIn class="w-4 h-4 text-sky-200 group-hover:text-white transition-transform duration-300 group-hover:translate-x-0.5" />
+          <span class="text-xs font-semibold tracking-wide">Log ind</span>
+        </template>
+      </button>
+
+      <!-- Stor, ren Brogaard Suite-signatur placeret højt i billedet (uden ikon) -->
+      <header
+        class="relative z-10 pt-12 sm:pt-16 pb-4 px-6 flex items-center justify-center select-none pointer-events-none shrink-0"
+      >
+        <div class="flex items-center gap-4 sm:gap-6">
           <span
             aria-hidden="true"
             class="h-px w-10 sm:w-20 bg-gradient-to-r from-transparent via-white/35 to-white/60"
@@ -192,44 +224,6 @@ async function handleLogin() {
             class="h-px w-10 sm:w-20 bg-gradient-to-l from-transparent via-white/35 to-white/60"
           ></span>
         </div>
-
-        <!-- Dobbelt-indfattet krystalglas LOG IND-knap (inspireret af bezel/gloss-stil, tilpasset aktivt tema) -->
-        <Transition name="suite-pill-fade">
-          <button
-            v-if="!isLoginBoxOpen"
-            type="button"
-            aria-label="Åbn login"
-            :style="{
-              '--suite-btn-accent': currentTheme.accent,
-              '--suite-btn-accent-soft': currentTheme.accentSoft
-            }"
-            class="suite-crystal-bezel group mt-6 p-[3px] rounded-2xl backdrop-blur-xl transition-all duration-300 cursor-pointer focus:outline-none"
-            @click="openLoginBox"
-          >
-            <span
-              class="suite-crystal-inner relative block px-9 py-2.5 rounded-[13px] overflow-hidden transition-all duration-300"
-            >
-              <!-- Skrå glasglans hen over øverste halvdel -->
-              <span
-                aria-hidden="true"
-                class="suite-crystal-gloss pointer-events-none absolute inset-0"
-              ></span>
-              <!-- Subtilt tema-farvet bundskær -->
-              <span
-                aria-hidden="true"
-                class="pointer-events-none absolute inset-x-3 bottom-0 h-px opacity-85"
-                :style="{
-                  background: `linear-gradient(90deg, transparent, ${currentTheme.accent}, transparent)`
-                }"
-              ></span>
-              <span
-                class="relative z-10 block text-xs sm:text-[13px] font-bold tracking-[0.30em] uppercase text-white drop-shadow-[0_1px_6px_rgba(0,0,0,0.65)] pl-[0.30em]"
-              >
-                Log ind
-              </span>
-            </span>
-          </button>
-        </Transition>
       </header>
 
       <!-- Centreret frostet krystalglas-panel -->
@@ -422,69 +416,6 @@ async function handleLogin() {
 .suite-pwd-input::-ms-reveal,
 .suite-pwd-input::-ms-clear {
   display: none;
-}
-
-/* Dobbelt-indfattet krystalglas-knap under Brogaard Suite-titlen */
-.suite-crystal-bezel {
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.52) 0%,
-    rgba(255, 255, 255, 0.16) 52%,
-    rgba(255, 255, 255, 0.34) 100%
-  );
-  box-shadow:
-    0 14px 34px -6px rgba(0, 0, 0, 0.55),
-    0 0 26px -4px var(--suite-btn-accent-soft, rgba(71, 118, 173, 0.28)),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
-}
-.suite-crystal-bezel:hover {
-  transform: translateY(-1.5px);
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.68) 0%,
-    rgba(255, 255, 255, 0.24) 52%,
-    rgba(255, 255, 255, 0.46) 100%
-  );
-  box-shadow:
-    0 18px 40px -6px rgba(0, 0, 0, 0.62),
-    0 0 34px -2px var(--suite-btn-accent-soft, rgba(71, 118, 173, 0.42)),
-    inset 0 1px 0 rgba(255, 255, 255, 0.85);
-}
-.suite-crystal-bezel:active {
-  transform: translateY(0.5px) scale(0.985);
-}
-.suite-crystal-inner {
-  background:
-    radial-gradient(
-      120% 95% at 50% 105%,
-      var(--suite-btn-accent-soft, rgba(71, 118, 173, 0.32)) 0%,
-      transparent 70%
-    ),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.56) 0%, rgba(6, 11, 22, 0.78) 100%);
-  box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.28),
-    inset 0 -1px 2px rgba(0, 0, 0, 0.55),
-    0 1px 2px rgba(0, 0, 0, 0.65);
-}
-.suite-crystal-gloss {
-  background: linear-gradient(
-    173deg,
-    rgba(255, 255, 255, 0.26) 0%,
-    rgba(255, 255, 255, 0.08) 46%,
-    rgba(255, 255, 255, 0) 48.5%
-  );
-}
-
-.suite-pill-fade-enter-active,
-.suite-pill-fade-leave-active {
-  transition:
-    opacity 0.22s ease,
-    transform 0.22s ease;
-}
-.suite-pill-fade-enter-from,
-.suite-pill-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-6px) scale(0.96);
 }
 
 /* Blød glas-animation når login-boksen åbnes og skjules */
