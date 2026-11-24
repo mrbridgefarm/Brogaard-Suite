@@ -13,7 +13,6 @@ import {
 } from 'lucide-vue-next';
 import { useSuiteStore } from '../../stores/suiteStore';
 import { useTheme } from '../../composables/useTheme';
-import ThemePicker from './ThemePicker.vue';
 
 const suiteStore = useSuiteStore();
 const { currentTheme } = useTheme();
@@ -27,22 +26,6 @@ const errorMsg = ref('');
 const now = ref(new Date());
 
 let clockTimer: ReturnType<typeof setInterval> | null = null;
-
-function getIsoWeekNumber(date: Date): number {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-}
-
-const clockLabel = computed(() => {
-  const dt = now.value;
-  const hh = String(dt.getHours()).padStart(2, '0');
-  const mm = String(dt.getMinutes()).padStart(2, '0');
-  const week = getIsoWeekNumber(dt);
-  return `${hh}:${mm} · Uge ${week}`;
-});
 
 const greetingTitle = computed(() => {
   const hour = now.value.getHours();
@@ -120,7 +103,7 @@ function tryClose() {
   <Teleport to="body">
     <div
       v-if="suiteStore.isLoginModalOpen || (!suiteStore.isAuthenticated && !suiteStore.isPublicShareMode)"
-      class="fixed inset-0 z-50 flex flex-col justify-between overflow-y-auto bg-slate-950"
+      class="fixed inset-0 z-50 flex flex-col justify-center overflow-y-auto bg-slate-950"
       @click.self="tryClose"
     >
       <!-- Baggrundsbillede + stemningsfuld vignette -->
@@ -134,32 +117,75 @@ function tryClose() {
         :style="{ background: currentTheme.loginOverlay }"
       ></div>
 
-      <!-- Top-bjælke med branding, live ur & temavælger -->
-      <header class="relative z-20 px-6 py-5 flex items-center justify-between">
-        <div class="flex items-center gap-2.5 text-white/95">
-          <img src="/suite-icon.svg" alt="Brogaard Suite" class="w-6 h-6" />
-          <span class="text-base font-semibold tracking-tight">Brogaard Suite</span>
-        </div>
+      <!-- Diskret luk-knap hvis modal åbnes mens brugeren allerede er logget ind -->
+      <button
+        v-if="canCloseModal"
+        type="button"
+        class="fixed top-5 right-6 z-20 p-2 rounded-xl bg-black/35 hover:bg-black/55 border border-white/15 text-white/80 hover:text-white backdrop-blur-md transition"
+        title="Luk"
+        @click="tryClose"
+      >
+        <X class="w-4 h-4" />
+      </button>
 
-        <div class="flex items-center gap-3">
-          <span class="text-sm text-white/80 font-medium tabular-nums hidden sm:inline">
-            {{ clockLabel }}
-          </span>
-          <ThemePicker variant="floating" />
-          <button
-            v-if="canCloseModal"
-            type="button"
-            class="p-1.5 rounded-xl bg-black/35 hover:bg-black/55 border border-white/15 text-white/80 hover:text-white backdrop-blur-md transition"
-            title="Luk"
-            @click="tryClose"
+      <!-- Centreret branding + frostet krystalglas-panel -->
+      <main class="relative z-10 px-4 py-10 flex flex-col items-center justify-center my-auto">
+        <!-- Elegant centreret Brogaard Suite signatur -->
+        <div class="mb-6 flex flex-col items-center select-none">
+          <div
+            class="relative flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-white/20 via-white/10 to-white/5 backdrop-blur-xl border border-white/25 shadow-[0_12px_32px_-6px_rgba(0,0,0,0.5)]"
           >
-            <X class="w-4 h-4" />
-          </button>
-        </div>
-      </header>
+            <span
+              aria-hidden="true"
+              class="pointer-events-none absolute inset-x-2 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent"
+            ></span>
+            <svg
+              class="w-6 h-6 drop-shadow"
+              viewBox="0 0 32 32"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <rect
+                x="4"
+                y="6.5"
+                width="24"
+                height="19"
+                rx="4.5"
+                stroke="white"
+                stroke-opacity="0.92"
+                stroke-width="1.75"
+              />
+              <path
+                d="M5.5 9L16 17L26.5 9"
+                stroke="white"
+                stroke-opacity="0.95"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <circle cx="11.5" cy="21.5" r="1.4" fill="#7dd3fc" />
+              <circle cx="16" cy="21.5" r="1.4" fill="#a5b4fc" />
+              <circle cx="20.5" cy="21.5" r="1.4" fill="#6ee7b7" />
+            </svg>
+          </div>
 
-      <!-- Centreret frostet krystalglas-panel -->
-      <main class="relative z-10 px-4 py-6 flex items-center justify-center">
+          <div class="mt-3.5 flex items-center gap-3">
+            <span
+              aria-hidden="true"
+              class="h-px w-8 bg-gradient-to-r from-transparent to-white/40"
+            ></span>
+            <span class="text-[14px] tracking-[0.24em] uppercase text-white/95 drop-shadow">
+              <span class="font-semibold">Brogaard</span>
+              <span class="font-light text-sky-200/90 ml-1.5">Suite</span>
+            </span>
+            <span
+              aria-hidden="true"
+              class="h-px w-8 bg-gradient-to-l from-transparent to-white/40"
+            ></span>
+          </div>
+        </div>
+
         <div
           class="dav-login-card relative overflow-hidden w-full max-w-[400px] rounded-2xl px-7 py-8 shadow-2xl border transition-all duration-300"
           :class="
@@ -321,8 +347,6 @@ function tryClose() {
           </div>
         </div>
       </main>
-
-      <div class="h-10 shrink-0 relative z-10 pointer-events-none"></div>
     </div>
   </Teleport>
 </template>
