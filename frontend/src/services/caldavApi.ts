@@ -4,7 +4,8 @@ import type {
   RsvpStatus,
   PublicShareLink,
   UserCalendarShare,
-  CalendarSharePermission
+  CalendarSharePermission,
+  SharedCalendarSearchResult
 } from '../types/calendar';
 
 export interface SyncResponse {
@@ -283,6 +284,50 @@ export async function apiRestoreDismissedSharedCalendars(): Promise<void> {
   if (!res.ok || !data.ok) {
     throw new Error(data.error || 'Kunne ikke gendanne forladte delte kalendere.');
   }
+}
+
+export async function apiSearchSharedCalendars(
+  query: string,
+  candidateEmails?: string[]
+): Promise<SharedCalendarSearchResult[]> {
+  const res = await fetch('/api/caldav/shared-search', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ query, candidateEmails })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke søge efter delte kalendere.');
+  }
+  return Array.isArray(data.calendars) ? data.calendars : [];
+}
+
+export async function apiSubscribeSharedCalendar(params: {
+  calendarUrl: string;
+  owner?: string;
+  name?: string;
+  color?: string;
+}): Promise<{
+  calendar: Omit<CalendarSource, 'visible'>;
+  events: CalendarEvent[];
+  subscribedInSogo: boolean;
+}> {
+  const res = await fetch('/api/caldav/shared-subscribe', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(params)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke tilføje den delte kalender.');
+  }
+  return {
+    calendar: data.calendar,
+    events: Array.isArray(data.events) ? data.events : [],
+    subscribedInSogo: Boolean(data.subscribedInSogo)
+  };
 }
 
 export async function apiSetCalendarName(params: {

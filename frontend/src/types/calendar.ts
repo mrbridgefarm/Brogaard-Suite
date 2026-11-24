@@ -137,3 +137,14 @@ export interface UserCalendarShare {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface SharedCalendarSearchResult {
+  url: string;
+  name: string;
+  color: string;
+  owner?: string;
+  ownerDisplayName?: string;
+  readOnly: boolean;
+  sharePermission: CalendarSharePermission;
+  description?: string;
+}

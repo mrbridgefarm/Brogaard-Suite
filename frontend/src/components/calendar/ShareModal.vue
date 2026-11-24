@@ -12,7 +12,8 @@ import {
   Users,
   UserPlus,
   Pencil,
-  Eye
+  Eye,
+  RefreshCw
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../../stores/calendarStore';
 import { useContactsStore } from '../../stores/contactsStore';
@@ -319,9 +320,24 @@ async function handleCreateShare() {
 
           <!-- Aktive bruger-delinger -->
           <div class="space-y-2">
-            <h4 class="font-bold uppercase tracking-wider text-slate-400 text-[11px]">
-              Brugere med adgang ({{ store.userShares.length }})
-            </h4>
+            <div class="flex items-center justify-between gap-2">
+              <h4 class="font-bold uppercase tracking-wider text-slate-400 text-[11px]">
+                Brugere med adgang ({{ store.userShares.length }})
+              </h4>
+              <button
+                type="button"
+                :disabled="store.isLoadingUserShares"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-[10.5px] text-slate-300 hover:text-slate-100 disabled:opacity-50 transition"
+                title="Opdatér status fra Mailcow/SOGo"
+                @click="store.loadUserShares()"
+              >
+                <RefreshCw
+                  class="w-3 h-3"
+                  :class="store.isLoadingUserShares ? 'animate-spin' : ''"
+                />
+                <span>Opdatér</span>
+              </button>
+            </div>
 
             <div
               v-if="store.isLoadingUserShares && store.userShares.length === 0"

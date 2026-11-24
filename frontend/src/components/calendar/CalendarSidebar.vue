@@ -18,14 +18,21 @@ import {
   Users,
   Pencil,
   Check,
-  UserMinus
+  UserMinus,
+  Search,
+  UserPlus,
+  Loader2
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../../stores/calendarStore';
 import { useContactsStore } from '../../stores/contactsStore';
 import { useTheme } from '../../composables/useTheme';
 import { requestNotificationPermission } from '../../services/notifications';
-import type { CalendarEvent, CalendarSource } from '../../types/calendar';
-import { ref, nextTick } from 'vue';
+import type {
+  CalendarEvent,
+  CalendarSource,
+  SharedCalendarSearchResult
+} from '../../types/calendar';
+import { ref, computed, nextTick } from 'vue';
 
 const props = defineProps<{
   width: number;
@@ -41,11 +48,94 @@ const notifPermission = ref<string>(
 
 const { currentTheme } = useTheme();
 const showNewCalendarForm = ref(false);
-const addCalendarMode = ref<'CALDAV' | 'SUBSCRIBE'>('SUBSCRIBE');
+const addCalendarMode = ref<'SHARED' | 'CALDAV' | 'SUBSCRIBE'>('SUBSCRIBE');
 const newCalendarName = ref('');
 const newCalendarUrl = ref('');
 const newCalendarColor = ref('#7c3aed');
 const isCreatingCalendar = ref(false);
+
+const sharedSearchQuery = ref('');
+const sharedSearchResults = ref<SharedCalendarSearchResult[]>([]);
+const isSearchingShared = ref(false);
+const hasSearchedShared = ref(false);
+const sharedSearchError = ref('');
+const subscribingSharedUrl = ref<string | null>(null);
+const showSharedSuggestions = ref(false);
+
+const sharedContactSuggestions = computed(() => {
+  if (!showSharedSuggestions.value) return [];
+  const q = sharedSearchQuery.value.trim();
+  if (!q) return [];
+  return contactsStore.searchContactsForAutocomplete(q, 6);
+});
+
+function openSharedCalendarSearch() {
+  if (showNewCalendarForm.value && addCalendarMode.value === 'SHARED') {
+    showNewCalendarForm.value = false;
+    return;
+  }
+  addCalendarMode.value = 'SHARED';
+  showNewCalendarForm.value = true;
+  if (!hasSearchedShared.value) {
+    void runSharedCalendarSearch();
+  }
+}
+
+function selectSharedTab() {
+  addCalendarMode.value = 'SHARED';
+  if (!hasSearchedShared.value) {
+    void runSharedCalendarSearch();
+  }
+}
+
+function selectSharedContactSuggestion(item: { name: string; email: string }) {
+  sharedSearchQuery.value = item.email.trim();
+  showSharedSuggestions.value = false;
+  void runSharedCalendarSearch();
+}
+
+function handleSharedSearchBlur() {
+  window.setTimeout(() => {
+    showSharedSuggestions.value = false;
+  }, 160);
+}
+
+async function runSharedCalendarSearch() {
+  isSearchingShared.value = true;
+  sharedSearchError.value = '';
+  try {
+    const q = sharedSearchQuery.value.trim();
+    const matchedContacts = q
+      ? contactsStore.searchContactsForAutocomplete(q, 6).map((c) => c.email)
+      : [];
+    sharedSearchResults.value = await store.searchSharedCalendars(q, matchedContacts);
+  } catch (err: any) {
+    sharedSearchError.value = err?.message || 'Kunne ikke søge efter delte kalendere i SOGo.';
+    sharedSearchResults.value = [];
+  } finally {
+    hasSearchedShared.value = true;
+    isSearchingShared.value = false;
+  }
+}
+
+async function handleSubscribeShared(item: SharedCalendarSearchResult) {
+  subscribingSharedUrl.value = item.url;
+  try {
+    await store.subscribeSharedCalendar(item);
+  } finally {
+    subscribingSharedUrl.value = null;
+  }
+}
+
+function formatOutgoingShareTooltip(cal: CalendarSource): string {
+  return store
+    .getOutgoingSharesForCalendar(cal)
+    .map(
+      (s) =>
+        `${s.recipientEmail} (${s.permission === 'write' ? 'Læs & Skriv' : 'Kun læsning'})`
+    )
+    .join('\n');
+}
 
 const editingCalId = ref<string | null>(null);
 const renameDraft = ref('');
@@ -250,6 +340,20 @@ function removeSingleClipboardEvent(evId: string) {
             <button
               v-if="!store.isPublicShareMode"
               type="button"
+              class="p-1 rounded-md border transition"
+              :class="
+                showNewCalendarForm && addCalendarMode === 'SHARED'
+                  ? 'bg-blue-600 text-white border-blue-500'
+                  : 'bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white border-slate-700'
+              "
+              title="Søg og tilføj delt kalender fra en anden bruger"
+              @click="openSharedCalendarSearch"
+            >
+              <Search class="w-3.5 h-3.5" />
+            </button>
+            <button
+              v-if="!store.isPublicShareMode"
+              type="button"
               class="p-1 rounded-md bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white border border-slate-700 transition"
               title="Tilføj eller opret ny kalender"
               @click="showNewCalendarForm = !showNewCalendarForm"
@@ -259,15 +363,22 @@ function removeSingleClipboardEvent(evId: string) {
           </div>
         </div>
 
-        <form
+        <div
           v-if="showNewCalendarForm && !store.isPublicShareMode"
           class="mb-2.5 p-2.5 rounded-xl bg-slate-950 border border-blue-500/40 space-y-2"
-          @submit.prevent="submitNewCalendar"
         >
-          <div class="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[10.5px] font-semibold">
+          <div class="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-semibold">
             <button
               type="button"
-              class="py-1 px-1.5 rounded-md transition truncate"
+              class="py-1 px-1 rounded-md transition truncate"
+              :class="addCalendarMode === 'SHARED' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
+              @click="selectSharedTab"
+            >
+              Delt
+            </button>
+            <button
+              type="button"
+              class="py-1 px-1 rounded-md transition truncate"
               :class="addCalendarMode === 'SUBSCRIBE' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
               @click="addCalendarMode = 'SUBSCRIBE'"
             >
@@ -275,7 +386,7 @@ function removeSingleClipboardEvent(evId: string) {
             </button>
             <button
               type="button"
-              class="py-1 px-1.5 rounded-md transition truncate"
+              class="py-1 px-1 rounded-md transition truncate"
               :class="addCalendarMode === 'CALDAV' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
               @click="addCalendarMode = 'CALDAV'"
             >
@@ -283,100 +394,240 @@ function removeSingleClipboardEvent(evId: string) {
             </button>
           </div>
 
-          <template v-if="addCalendarMode === 'SUBSCRIBE'">
-            <button
-              type="button"
-              :disabled="isCreatingCalendar"
-              class="w-full py-1.5 px-2 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-200 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-50"
-              @click="quickSubscribeDanishHolidays"
+          <div v-if="addCalendarMode === 'SHARED'" class="space-y-2">
+            <form class="space-y-1.5" @submit.prevent="runSharedCalendarSearch">
+              <div class="text-[10px] text-slate-400 leading-tight">
+                Søg på en kollegas navn eller e-mail i Mailcow/SOGo (f.eks. <code class="text-slate-300">theo</code>):
+              </div>
+
+              <div class="relative flex items-center gap-1">
+                <input
+                  v-model="sharedSearchQuery"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="Navn eller e-mail (f.eks. theo)..."
+                  class="flex-1 min-w-0 px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  @focus="showSharedSuggestions = true"
+                  @blur="handleSharedSearchBlur"
+                />
+                <button
+                  type="submit"
+                  :disabled="isSearchingShared"
+                  class="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-[11px] font-semibold inline-flex items-center gap-1 shrink-0 transition"
+                >
+                  <Loader2 v-if="isSearchingShared" class="w-3 h-3 animate-spin" />
+                  <Search v-else class="w-3 h-3" />
+                  <span>Søg</span>
+                </button>
+
+                <div
+                  v-if="sharedContactSuggestions.length > 0"
+                  class="absolute left-0 right-0 top-full mt-1 rounded-lg bg-slate-900 border border-slate-700 shadow-2xl max-h-36 overflow-y-auto z-40 divide-y divide-slate-800"
+                >
+                  <button
+                    v-for="item in sharedContactSuggestions"
+                    :key="item.email"
+                    type="button"
+                    class="w-full px-2.5 py-1.5 text-left hover:bg-slate-800 flex items-center justify-between gap-1.5 transition"
+                    @mousedown.prevent="selectSharedContactSuggestion(item)"
+                  >
+                    <span class="text-[11px] font-medium text-slate-100 truncate">{{ item.name }}</span>
+                    <span class="text-[10px] text-slate-400 truncate">{{ item.email }}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            <div
+              v-if="sharedSearchError"
+              class="p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[10.5px] text-rose-200"
             >
-              <svg class="w-4 h-3 rounded-[2px] shrink-0 shadow-sm" viewBox="0 0 28 20" xmlns="http://www.w3.org/2000/svg">
-                <rect width="28" height="20" fill="#c8102e" />
-                <rect x="8" y="0" width="3.5" height="20" fill="#ffffff" />
-                <rect x="0" y="8.25" width="28" height="3.5" fill="#ffffff" />
-              </svg>
-              <span>Tilføj Danske Helligdage (1-klik)</span>
-            </button>
-
-            <div class="text-[10px] text-slate-400 leading-tight pt-0.5">
-              Eller indsæt iCal / <code class="text-slate-300">.ics</code> / <code class="text-slate-300">webcal://</code> link fra Google, Microsoft Outlook eller Apple iCloud:
+              {{ sharedSearchError }}
             </div>
 
-            <div>
-              <input
-                v-model="newCalendarUrl"
-                type="text"
-                placeholder="https://... eller webcal://... (.ics)"
-                class="w-full px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div class="flex items-center gap-2">
-              <input
-                v-model="newCalendarName"
-                type="text"
-                placeholder="Valgfrit navn (hentes ellers automatisk)..."
-                class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
-              />
-              <input
-                v-model="newCalendarColor"
-                type="color"
-                class="w-7 h-7 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
-                title="Vælg farve"
-              />
-            </div>
-          </template>
-
-          <template v-else>
-            <div class="flex items-center gap-2">
-              <input
-                v-model="newCalendarName"
-                type="text"
-                placeholder="Kalendernavn..."
-                class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
-              />
-              <input
-                v-model="newCalendarColor"
-                type="color"
-                class="w-7 h-7 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
-                title="Vælg farve"
-              />
-            </div>
-            <div>
-              <input
-                v-model="newCalendarUrl"
-                type="text"
-                placeholder="Valgfri CalDAV URL..."
-                class="w-full px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-          </template>
-
-          <div class="flex items-center justify-end gap-1.5">
-            <button
-              type="button"
-              class="px-2 py-1 rounded-lg text-[11px] text-slate-300 hover:bg-slate-800"
-              @click="showNewCalendarForm = false"
+            <div
+              v-else-if="isSearchingShared && sharedSearchResults.length === 0"
+              class="p-3 text-center rounded-lg bg-slate-900/70 border border-slate-800 text-[10.5px] text-slate-400 flex items-center justify-center gap-1.5"
             >
-              Annullér
-            </button>
-            <button
-              type="submit"
-              :disabled="isCreatingCalendar"
-              class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
+              <Loader2 class="w-3.5 h-3.5 animate-spin text-blue-400" />
+              <span>Søger i Mailcow/SOGo...</span>
+            </div>
+
+            <div
+              v-else-if="sharedSearchResults.length > 0"
+              class="space-y-1.5 max-h-48 overflow-y-auto pr-0.5"
             >
-              {{
-                isCreatingCalendar
-                  ? 'Henter...'
-                  : addCalendarMode === 'SUBSCRIBE'
-                    ? 'Abonnér'
-                    : newCalendarUrl
-                      ? 'Tilføj link'
-                      : 'Opret ny'
-              }}
-            </button>
+              <div
+                v-for="item in sharedSearchResults"
+                :key="item.url"
+                class="p-2 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between gap-2"
+              >
+                <div class="min-w-0 flex-1 space-y-0.5">
+                  <div class="flex items-center gap-1.5">
+                    <span
+                      class="w-2 h-2 rounded-full shrink-0"
+                      :style="{ backgroundColor: item.color }"
+                    ></span>
+                    <span class="text-[11px] font-semibold text-slate-100 truncate">
+                      {{ item.name }}
+                    </span>
+                  </div>
+                  <div class="text-[10px] text-slate-400 truncate">
+                    Delt af {{
+                      item.ownerDisplayName && item.owner && item.ownerDisplayName !== item.owner
+                        ? `${item.ownerDisplayName} (${item.owner})`
+                        : item.owner || 'bruger'
+                    }}
+                  </div>
+                  <div>
+                    <span
+                      class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border"
+                      :class="
+                        item.sharePermission === 'write'
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                      "
+                    >
+                      {{ item.sharePermission === 'write' ? 'Læs & Skriv' : 'Kun læsning' }}
+                    </span>
+                  </div>
+                </div>
+
+                <span
+                  v-if="store.isSharedCalendarAlreadyAdded(item)"
+                  class="px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-semibold inline-flex items-center gap-1 shrink-0"
+                >
+                  <Check class="w-3 h-3" />
+                  <span>Tilføjet</span>
+                </span>
+                <button
+                  v-else
+                  type="button"
+                  :disabled="subscribingSharedUrl === item.url"
+                  class="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-[10.5px] font-semibold inline-flex items-center gap-1 shrink-0 transition"
+                  @click="handleSubscribeShared(item)"
+                >
+                  <Loader2 v-if="subscribingSharedUrl === item.url" class="w-3 h-3 animate-spin" />
+                  <UserPlus v-else class="w-3 h-3" />
+                  <span>Tilføj</span>
+                </button>
+              </div>
+            </div>
+
+            <div
+              v-else-if="hasSearchedShared && !isSearchingShared"
+              class="p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 text-[10.5px] text-slate-400 leading-snug"
+            >
+              Ingen delte kalendere fundet. Prøv hele e-mailadressen (f.eks. <code class="text-slate-300">theo@ditdomæne.dk</code>) og tjek at ejeren har delt kalenderen med dig i SOGo.
+            </div>
+
+            <div class="flex items-center justify-end">
+              <button
+                type="button"
+                class="px-2 py-1 rounded-lg text-[11px] text-slate-300 hover:bg-slate-800"
+                @click="showNewCalendarForm = false"
+              >
+                Luk
+              </button>
+            </div>
           </div>
-        </form>
+
+          <form v-else class="space-y-2" @submit.prevent="submitNewCalendar">
+            <template v-if="addCalendarMode === 'SUBSCRIBE'">
+              <button
+                type="button"
+                :disabled="isCreatingCalendar"
+                class="w-full py-1.5 px-2 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-200 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+                @click="quickSubscribeDanishHolidays"
+              >
+                <svg class="w-4 h-3 rounded-[2px] shrink-0 shadow-sm" viewBox="0 0 28 20" xmlns="http://www.w3.org/2000/svg">
+                  <rect width="28" height="20" fill="#c8102e" />
+                  <rect x="8" y="0" width="3.5" height="20" fill="#ffffff" />
+                  <rect x="0" y="8.25" width="28" height="3.5" fill="#ffffff" />
+                </svg>
+                <span>Tilføj Danske Helligdage (1-klik)</span>
+              </button>
+
+              <div class="text-[10px] text-slate-400 leading-tight pt-0.5">
+                Eller indsæt iCal / <code class="text-slate-300">.ics</code> / <code class="text-slate-300">webcal://</code> link fra Google, Microsoft Outlook eller Apple iCloud:
+              </div>
+
+              <div>
+                <input
+                  v-model="newCalendarUrl"
+                  type="text"
+                  placeholder="https://... eller webcal://... (.ics)"
+                  class="w-full px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div class="flex items-center gap-2">
+                <input
+                  v-model="newCalendarName"
+                  type="text"
+                  placeholder="Valgfrit navn (hentes ellers automatisk)..."
+                  class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
+                />
+                <input
+                  v-model="newCalendarColor"
+                  type="color"
+                  class="w-7 h-7 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
+                  title="Vælg farve"
+                />
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="flex items-center gap-2">
+                <input
+                  v-model="newCalendarName"
+                  type="text"
+                  placeholder="Kalendernavn..."
+                  class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
+                />
+                <input
+                  v-model="newCalendarColor"
+                  type="color"
+                  class="w-7 h-7 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
+                  title="Vælg farve"
+                />
+              </div>
+              <div>
+                <input
+                  v-model="newCalendarUrl"
+                  type="text"
+                  placeholder="Valgfri CalDAV URL..."
+                  class="w-full px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </template>
+
+            <div class="flex items-center justify-end gap-1.5">
+              <button
+                type="button"
+                class="px-2 py-1 rounded-lg text-[11px] text-slate-300 hover:bg-slate-800"
+                @click="showNewCalendarForm = false"
+              >
+                Annullér
+              </button>
+              <button
+                type="submit"
+                :disabled="isCreatingCalendar"
+                class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
+              >
+                {{
+                  isCreatingCalendar
+                    ? 'Henter...'
+                    : addCalendarMode === 'SUBSCRIBE'
+                      ? 'Abonnér'
+                      : newCalendarUrl
+                        ? 'Tilføj link'
+                        : 'Opret ny'
+                }}
+              </button>
+            </div>
+          </form>
+        </div>
 
         <div class="space-y-1.5">
           <div
@@ -434,6 +685,23 @@ function removeSingleClipboardEvent(evId: string) {
                   </div>
                   <div v-else-if="cal.isShared || cal.owner" class="text-[10px] text-slate-400 truncate">
                     Delt af {{ cal.owner || 'ejer' }} • {{ cal.readOnly ? 'Kun læsning' : 'Skrivbar' }}
+                  </div>
+                  <div
+                    v-else-if="store.getOutgoingSharesForCalendar(cal).length > 0"
+                    class="mt-0.5"
+                  >
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-[9.5px] text-blue-300 font-medium transition max-w-full"
+                      :title="formatOutgoingShareTooltip(cal)"
+                      @click.stop.prevent="store.openShareModal(cal.id)"
+                    >
+                      <Users class="w-2.5 h-2.5 shrink-0" />
+                      <span class="truncate">
+                        Delt med {{ store.getOutgoingSharesForCalendar(cal).length }}
+                        {{ store.getOutgoingSharesForCalendar(cal).length === 1 ? 'bruger' : 'brugere' }}
+                      </span>
+                    </button>
                   </div>
                 </div>
               </label>
@@ -743,11 +1011,11 @@ function removeSingleClipboardEvent(evId: string) {
         <button
           type="button"
           class="flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-xs text-blue-300 font-semibold transition"
-          title="Del kalender via offentligt Read-Only link"
+          title="Del kalender med brugere (Læs/Skriv) eller offentligt link"
           @click="store.openShareModal()"
         >
           <Share2 class="w-3.5 h-3.5 shrink-0" />
-          <span class="truncate">Del link</span>
+          <span class="truncate">Del kalender</span>
         </button>
 
         <button

@@ -70,12 +70,32 @@ export function isSogoShareId(shareId: string): boolean {
   return shareId.startsWith('sogo::');
 }
 
-function encodeSogoShareId(calendarUrl: string, recipientUid: string): string {
+export function encodeSogoShareId(calendarUrl: string, recipientUid: string): string {
   const payload = JSON.stringify({
     u: ensureTrailingSlash(calendarUrl.trim()),
     r: recipientUid.trim()
   });
   return `sogo::${Buffer.from(payload, 'utf8').toString('base64url')}`;
+}
+
+function canonicalSogoDavUrl(rawUrl: string): string {
+  try {
+    const u = new URL(ensureTrailingSlash(rawUrl.trim()));
+    const decoded = u.pathname
+      .split('/')
+      .map((seg) => {
+        try {
+          return decodeURIComponent(seg);
+        } catch {
+          return seg;
+        }
+      })
+      .join('/')
+      .toLowerCase();
+    return `${u.origin.toLowerCase()}${decoded}`;
+  } catch {
+    return ensureTrailingSlash(rawUrl.trim()).toLowerCase();
+  }
 }
 
 function decodeSogoShareId(
@@ -180,6 +200,94 @@ async function sendSogoAclReport(
   }
 }
 
+function parseSogoUserBlocks(
+  xml: string,
+  excludeUserLower: string
+): Array<{ uid: string; email: string; displayName?: string }> {
+  const userMatches = Array.from(
+    xml.matchAll(/<(?:[A-Za-z0-9_-]+:)?user\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?user>/gi)
+  );
+  const parsed: Array<{ uid: string; email: string; displayName?: string }> = [];
+  const seen = new Set<string>();
+
+  for (const um of userMatches) {
+    const inner = um[1];
+    const idMatch = inner.match(
+      /<(?:[A-Za-z0-9_-]+:)?id\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?id>/i
+    );
+    const dnMatch = inner.match(
+      /<(?:[A-Za-z0-9_-]+:)?displayName\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?displayName>/i
+    );
+    const mailMatch = inner.match(
+      /<(?:[A-Za-z0-9_-]+:)?email\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?email>/i
+    );
+
+    const uid = idMatch ? unescapeXml(idMatch[1].trim()) : '';
+    if (!uid || uid.startsWith('<')) continue;
+    const uidLower = uid.toLowerCase();
+    if (
+      uidLower === 'anonymous' ||
+      uidLower === '<default>' ||
+      uidLower === excludeUserLower ||
+      seen.has(uidLower)
+    ) {
+      continue;
+    }
+    seen.add(uidLower);
+
+    const email = mailMatch ? unescapeXml(mailMatch[1].trim()) : uid;
+    const displayName = dnMatch ? unescapeXml(dnMatch[1].trim()) : undefined;
+    parsed.push({
+      uid,
+      email: email || uid,
+      displayName: displayName && displayName !== uid ? displayName : undefined
+    });
+  }
+
+  return parsed;
+}
+
+export async function searchSogoUsers(
+  creds: CalDavCredentials,
+  query: string
+): Promise<Array<{ uid: string; email: string; displayName?: string }>> {
+  const cleanQuery = query.trim();
+  if (!cleanQuery) return [];
+
+  const base = ensureTrailingSlash(normalizeMailcowUrl(creds.serverUrl));
+  const rawUser = creds.username.trim();
+  const userLower = rawUser.toLowerCase();
+  const encodedUser = encodeURIComponent(rawUser);
+
+  const principalCandidates = [`${base}${rawUser}/`];
+  if (encodedUser !== rawUser) {
+    principalCandidates.push(`${base}${encodedUser}/`);
+  }
+
+  // VIGTIGT: Ingen whitespace mellem <user-query> og <users/> (SOGo bruger DOM firstChild)
+  const body = `<?xml version="1.0" encoding="utf-8"?><user-query xmlns="urn:inverse:params:xml:ns:inverse-dav"><users match-name="${escapeXml(cleanQuery)}"/></user-query>`;
+
+  for (const userFolderUrl of principalCandidates) {
+    try {
+      const res = await davRequest(
+        creds,
+        'REPORT',
+        userFolderUrl,
+        body,
+        { 'Content-Type': 'application/xml; charset=utf-8' },
+        5000
+      );
+      if (res.status === 204) return [];
+      const xml = await readResponseTextSmart(res);
+      return parseSogoUserBlocks(xml, userLower);
+    } catch {
+      // Prøv næste kandidat eller returnér tom liste
+    }
+  }
+
+  return [];
+}
+
 async function resolveSogoUserUid(
   creds: CalDavCredentials,
   emailOrUid: string
@@ -188,42 +296,10 @@ async function resolveSogoUserUid(
   const queryLower = query.toLowerCase();
 
   try {
-    const base = ensureTrailingSlash(normalizeMailcowUrl(creds.serverUrl));
-    const userFolderUrl = `${base}${creds.username.trim()}/`;
-    const body = `<?xml version="1.0" encoding="utf-8"?><user-query xmlns="urn:inverse:params:xml:ns:inverse-dav"><users match-name="${escapeXml(query)}"/></user-query>`;
-
-    const res = await davRequest(
-      creds,
-      'REPORT',
-      userFolderUrl,
-      body,
-      { 'Content-Type': 'application/xml; charset=utf-8' },
-      6000
-    );
-
-    if (res.status !== 204) {
-      const xml = await readResponseTextSmart(res);
-      const userBlocks = xml.matchAll(/<user\b[^>]*>([\s\S]*?)<\/user>/gi);
-      for (const block of userBlocks) {
-        const inner = block[1];
-        const idMatch = inner.match(/<id\b[^>]*>([\s\S]*?)<\/id>/i);
-        const dnMatch = inner.match(/<displayName\b[^>]*>([\s\S]*?)<\/displayName>/i);
-        const mailMatch = inner.match(/<email\b[^>]*>([\s\S]*?)<\/email>/i);
-
-        const uid = idMatch ? unescapeXml(idMatch[1].trim()) : '';
-        const email = mailMatch ? unescapeXml(mailMatch[1].trim()) : uid;
-        const displayName = dnMatch ? unescapeXml(dnMatch[1].trim()) : undefined;
-
-        if (
-          uid &&
-          (uid.toLowerCase() === queryLower || email.toLowerCase() === queryLower)
-        ) {
-          return {
-            uid,
-            email: email || queryLower,
-            displayName: displayName && displayName !== uid ? displayName : undefined
-          };
-        }
+    const users = await searchSogoUsers(creds, query);
+    for (const u of users) {
+      if (u.uid.toLowerCase() === queryLower || u.email.toLowerCase() === queryLower) {
+        return u;
       }
     }
   } catch {
@@ -273,14 +349,16 @@ function buildRolesXml(permission: CalendarSharePermission): string {
 }
 
 function parseRolesFromAclXml(xml: string): string[] {
-  const rolesBlockMatch = xml.match(/<roles\b[^>]*>([\s\S]*?)<\/roles>/i);
+  const rolesBlockMatch = xml.match(
+    /<(?:[A-Za-z0-9_-]+:)?roles\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?roles>/i
+  );
   const content = rolesBlockMatch ? rolesBlockMatch[1] : xml;
-  const tagMatches = content.matchAll(/<([A-Za-z0-9_]+)(?:\s*\/>|>)/g);
+  const tagMatches = content.matchAll(/<(?:[A-Za-z0-9_-]+:)?([A-Za-z0-9_]+)(?:\s*\/>|>)/g);
   const roles: string[] = [];
 
   for (const m of tagMatches) {
     const tag = m[1];
-    if (tag && tag !== 'roles' && tag !== 'None') {
+    if (tag && tag !== 'roles' && tag !== 'None' && tag !== 'acl-query') {
       roles.push(tag);
     }
   }
@@ -288,10 +366,24 @@ function parseRolesFromAclXml(xml: string): string[] {
   return roles;
 }
 
+export interface KnownOutgoingSogoHint {
+  calendarUrl: string;
+  calendarName: string;
+  calendarColor: string;
+  recipientEmail: string;
+  permission: CalendarSharePermission;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export async function listSogoCalendarShares(
   creds: CalDavCredentials,
-  calendars: CalendarInfoDTO[]
-): Promise<SogoCalendarShare[]> {
+  calendars: CalendarInfoDTO[],
+  knownHints: KnownOutgoingSogoHint[] = []
+): Promise<{
+  shares: SogoCalendarShare[];
+  staleHints: Array<{ calendarUrl: string; recipientEmail: string }>;
+}> {
   const ownCalendars = calendars.filter(
     (c) =>
       !c.isShared &&
@@ -300,42 +392,49 @@ export async function listSogoCalendarShares(
       /\/SOGo\/dav\//i.test(c.url || '')
   );
 
-  if (ownCalendars.length === 0) return [];
+  if (ownCalendars.length === 0 && knownHints.length === 0) {
+    return { shares: [], staleHints: [] };
+  }
 
   const userLower = creds.username.toLowerCase().trim();
   const now = new Date().toISOString();
 
+  const ownCalByCanon = new Map<string, CalendarInfoDTO>();
+  for (const cal of ownCalendars) {
+    ownCalByCanon.set(canonicalSogoDavUrl(cal.url), cal);
+  }
+
+  const allShares: SogoCalendarShare[] = [];
+  const foundKeys = new Set<string>();
+  const staleHints: Array<{ calendarUrl: string; recipientEmail: string }> = [];
+
   const perCalResults = await Promise.allSettled(
     ownCalendars.map(async (cal) => {
       const davUrl = ensureTrailingSlash(cal.url.trim());
-      const userListXml = await sendSogoAclReport(creds, davUrl, '<user-list/>');
+      let userListXml = '';
+      try {
+        // params="nocn,noemail" undgår SOGo davRecordForUser-nedbrud ved ukendte/eksterne brugere
+        userListXml = await sendSogoAclReport(creds, davUrl, '<user-list params="nocn,noemail"/>');
+      } catch (err: any) {
+        console.warn(
+          `SOGo ACL <user-list params="nocn,noemail"/> fejlede for ${davUrl}, prøver fallback:`,
+          err?.message || err
+        );
+        try {
+          userListXml = await sendSogoAclReport(creds, davUrl, '<user-list/>');
+        } catch (fallbackErr: any) {
+          console.warn(
+            `SOGo ACL <user-list/> fallback fejlede for ${davUrl}:`,
+            fallbackErr?.message || fallbackErr
+          );
+          return [] as SogoCalendarShare[];
+        }
+      }
+
       if (!userListXml) return [] as SogoCalendarShare[];
 
-      const userMatches = Array.from(userListXml.matchAll(/<user\b[^>]*>([\s\S]*?)<\/user>/gi));
-      if (userMatches.length === 0) return [] as SogoCalendarShare[];
-
-      const parsedUsers: Array<{ uid: string; email: string; displayName?: string }> = [];
-      for (const um of userMatches) {
-        const inner = um[1];
-        const idMatch = inner.match(/<id\b[^>]*>([\s\S]*?)<\/id>/i);
-        const dnMatch = inner.match(/<displayName\b[^>]*>([\s\S]*?)<\/displayName>/i);
-        const mailMatch = inner.match(/<email\b[^>]*>([\s\S]*?)<\/email>/i);
-
-        const uid = idMatch ? unescapeXml(idMatch[1].trim()) : '';
-        if (!uid || uid.startsWith('<')) continue;
-        const uidLower = uid.toLowerCase();
-        if (uidLower === 'anonymous' || uidLower === '<default>' || uidLower === userLower) {
-          continue;
-        }
-
-        const email = mailMatch ? unescapeXml(mailMatch[1].trim()) : uid;
-        const displayName = dnMatch ? unescapeXml(dnMatch[1].trim()) : undefined;
-        parsedUsers.push({
-          uid,
-          email: email || uid,
-          displayName: displayName && displayName !== uid ? displayName : undefined
-        });
-      }
+      const parsedUsers = parseSogoUserBlocks(userListXml, userLower);
+      if (parsedUsers.length === 0) return [] as SogoCalendarShare[];
 
       const roleChecks = await Promise.allSettled(
         parsedUsers.map(async (u) => {
@@ -379,17 +478,111 @@ export async function listSogoCalendarShares(
     })
   );
 
-  const allShares: SogoCalendarShare[] = [];
   for (const res of perCalResults) {
     if (res.status === 'fulfilled') {
-      allShares.push(...res.value);
+      for (const s of res.value) {
+        const cUrl = canonicalSogoDavUrl(s.calendarUrl);
+        foundKeys.add(`${cUrl}::${s.recipientUid.toLowerCase().trim()}`);
+        foundKeys.add(`${cUrl}::${s.recipientEmail.toLowerCase().trim()}`);
+        allShares.push(s);
+      }
     }
   }
 
-  return allShares.sort((a, b) => {
+  // Sikring mod manglende/oversete delinger: verificér kendte Suite-oprettede SOGo-hints direkte mod SOGo
+  const missingHints = knownHints.filter((hint) => {
+    const cUrl = canonicalSogoDavUrl(hint.calendarUrl);
+    const recipLower = hint.recipientEmail.toLowerCase().trim();
+    return recipLower && recipLower !== userLower && !foundKeys.has(`${cUrl}::${recipLower}`);
+  });
+
+  if (missingHints.length > 0) {
+    const hintChecks = await Promise.allSettled(
+      missingHints.map(async (hint) => {
+        const canonUrl = canonicalSogoDavUrl(hint.calendarUrl);
+        const ownCal = ownCalByCanon.get(canonUrl);
+        const davUrl = ownCal?.url
+          ? ensureTrailingSlash(ownCal.url.trim())
+          : ensureTrailingSlash(hint.calendarUrl.trim());
+        const calName = ownCal?.name || hint.calendarName || 'Kalender';
+        const calColor = ownCal?.color || ownCal?.serverColor || hint.calendarColor || '#2563eb';
+        const recipientUid = hint.recipientEmail.trim();
+
+        try {
+          const rolesXml = await sendSogoAclReport(
+            creds,
+            davUrl,
+            `<roles user="${escapeXml(recipientUid)}"/>`
+          );
+          const roles = parseRolesFromAclXml(rolesXml);
+          if (roles.length === 0) {
+            staleHints.push({ calendarUrl: davUrl, recipientEmail: hint.recipientEmail });
+            return null;
+          }
+
+          const permission: CalendarSharePermission = roles.some((r) => SOGO_WRITE_ROLES.has(r))
+            ? 'write'
+            : 'read';
+
+          const verified: SogoCalendarShare = {
+            id: encodeSogoShareId(davUrl, recipientUid),
+            ownerUsername: creds.username,
+            calendarUrl: davUrl,
+            calendarName: calName,
+            calendarColor: calColor,
+            recipientEmail: hint.recipientEmail,
+            recipientUid,
+            permission,
+            source: 'sogo',
+            createdAt: hint.createdAt || now,
+            updatedAt: hint.updatedAt || now
+          };
+          return verified;
+        } catch (err: any) {
+          if (err instanceof SogoAclUnsupportedError) {
+            return null;
+          }
+          console.warn(
+            `SOGo ACL <roles> verificering af hint fejlede midlertidigt for ${recipientUid}:`,
+            err?.message || err
+          );
+          const fallbackShare: SogoCalendarShare = {
+            id: encodeSogoShareId(davUrl, recipientUid),
+            ownerUsername: creds.username,
+            calendarUrl: davUrl,
+            calendarName: calName,
+            calendarColor: calColor,
+            recipientEmail: hint.recipientEmail,
+            recipientUid,
+            permission: hint.permission,
+            source: 'sogo',
+            createdAt: hint.createdAt || now,
+            updatedAt: hint.updatedAt || now
+          };
+          return fallbackShare;
+        }
+      })
+    );
+
+    for (const hc of hintChecks) {
+      if (hc.status === 'fulfilled' && hc.value) {
+        const cUrl = canonicalSogoDavUrl(hc.value.calendarUrl);
+        const uidKey = `${cUrl}::${hc.value.recipientUid.toLowerCase().trim()}`;
+        if (!foundKeys.has(uidKey)) {
+          foundKeys.add(uidKey);
+          foundKeys.add(`${cUrl}::${hc.value.recipientEmail.toLowerCase().trim()}`);
+          allShares.push(hc.value);
+        }
+      }
+    }
+  }
+
+  allShares.sort((a, b) => {
     const calCmp = a.calendarName.localeCompare(b.calendarName, 'da');
     return calCmp !== 0 ? calCmp : a.recipientEmail.localeCompare(b.recipientEmail, 'da');
   });
+
+  return { shares: allShares, staleHints };
 }
 
 export async function upsertSogoCalendarShare(params: {

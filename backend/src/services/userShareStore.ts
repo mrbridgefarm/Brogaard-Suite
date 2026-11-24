@@ -151,6 +151,14 @@ export function listOutgoingUserShares(ownerUsername: string): UserCalendarShare
     .map(toPublicInfo);
 }
 
+export function listOutgoingSogoShareHints(ownerUsername: string): UserCalendarSharePublicInfo[] {
+  const ownerLower = ownerUsername.toLowerCase().trim();
+  return readAllUserShares()
+    .filter((r) => r.mode === 'sogo' && r.ownerUsername.toLowerCase().trim() === ownerLower)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map(toPublicInfo);
+}
+
 export function upsertUserCalendarShare(params: {
   ownerCreds: CalDavCredentials;
   calendarUrl: string;

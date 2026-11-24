@@ -20,6 +20,8 @@ import {
   apiDeleteUserShare,
   apiLeaveSharedCalendar,
   apiRestoreDismissedSharedCalendars,
+  apiSearchSharedCalendars,
+  apiSubscribeSharedCalendar,
   apiSetCalendarName,
   apiFetchPublicShare,
   apiImportIcs,
@@ -42,7 +44,8 @@ import type {
   PublicShareLink,
   UserCalendarShare,
   CalendarSharePermission,
-  CalendarViewType
+  CalendarViewType,
+  SharedCalendarSearchResult
 } from '../types/calendar';
 
 const COLOR_OVERRIDE_KEY = 'dav_sync_cal_color_overrides_v1';
@@ -145,6 +148,7 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   let isFlushing = false;
   let flushRequested = false;
+  let userSharesRequestSeq = 0;
   const hiddenCalendarIds = ref<string[]>(loadHiddenCalendarIds());
   const dismissedSharedCount = ref<number>(0);
 
@@ -452,6 +456,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     calendars.value = [];
     events.value = [];
     shares.value = [];
+    userSharesRequestSeq += 1;
     userShares.value = [];
     syncQueue.value = [];
     dismissedSharedCount.value = 0;
@@ -625,6 +630,8 @@ export const useCalendarStore = defineStore('calendar', () => {
         }
       }
 
+      void loadUserShares();
+
       if (!silent) {
         notify('Kalendere synkroniseret', `Hentede ${plainEvents.length} begivenheder fra serveren.`, 'success');
       }
@@ -727,13 +734,172 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   async function loadUserShares() {
     if (session.value?.mode !== 'CALDAV') return;
+    const seq = ++userSharesRequestSeq;
     isLoadingUserShares.value = true;
     try {
-      userShares.value = await apiListUserShares();
+      const fetched = await apiListUserShares();
+      if (seq !== userSharesRequestSeq) return;
+      userShares.value = fetched;
     } catch (err) {
       console.warn('Kunne ikke hente bruger-delinger:', err);
     } finally {
-      isLoadingUserShares.value = false;
+      if (seq === userSharesRequestSeq) {
+        isLoadingUserShares.value = false;
+      }
+    }
+  }
+
+  function canonicalCalendarUrlKey(rawUrl: string): string {
+    const trimmed = (rawUrl || '').trim();
+    if (!trimmed) return '';
+    const withSlash = trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+    try {
+      const u = new URL(withSlash);
+      const decodedPath = u.pathname
+        .split('/')
+        .map((seg) => {
+          try {
+            return decodeURIComponent(seg);
+          } catch {
+            return seg;
+          }
+        })
+        .join('/');
+      return `${u.origin.toLowerCase()}${decodedPath.toLowerCase()}`;
+    } catch {
+      return withSlash.toLowerCase();
+    }
+  }
+
+  function sogoCalendarSignature(rawUrl: string, ownerHint?: string): string | null {
+    let decoded = '';
+    try {
+      decoded = decodeURIComponent(rawUrl || '');
+    } catch {
+      decoded = rawUrl || '';
+    }
+    const calMatch = decoded.match(/\/SOGo\/dav\/([^/]+)\/Calendar\/([^/]+)\/?$/i);
+    if (!calMatch || !calMatch[1] || !calMatch[2]) return null;
+
+    const folderSlug = calMatch[2].trim();
+    const unescapeSogoCss = (part: string): string =>
+      part
+        .replace(/^_(\d)/, '$1')
+        .replace(/_D_/gi, '.')
+        .replace(/_U_/gi, '_')
+        .replace(/_P_/gi, '+');
+
+    const sogoEncodedMatch = folderSlug.match(
+      /^([a-z0-9._+-]+)_A_([a-z0-9-]+(?:_D_[a-z0-9-]+)+)_(.+)$/i
+    );
+    if (sogoEncodedMatch) {
+      const slugOwner = `${unescapeSogoCss(sogoEncodedMatch[1])}@${unescapeSogoCss(sogoEncodedMatch[2])}`
+        .toLowerCase()
+        .trim();
+      const slug = sogoEncodedMatch[3].toLowerCase().trim();
+      return `sogo-cal::${slugOwner}::${slug}`;
+    }
+
+    const directAtMatch = folderSlug.match(/^([^\s/@]+@[^\s/@]+)_(.+)$/i);
+    if (directAtMatch) {
+      return `sogo-cal::${directAtMatch[1].toLowerCase().trim()}::${directAtMatch[2].toLowerCase().trim()}`;
+    }
+
+    const effOwner = (ownerHint || calMatch[1]).toLowerCase().trim();
+    return `sogo-cal::${effOwner}::${folderSlug.toLowerCase()}`;
+  }
+
+  function getOutgoingSharesForCalendar(cal: CalendarSource): UserCalendarShare[] {
+    const key = canonicalCalendarUrlKey(cal.url);
+    if (!key) return [];
+    return userShares.value.filter((s) => canonicalCalendarUrlKey(s.calendarUrl) === key);
+  }
+
+  function isSharedCalendarAlreadyAdded(candidate: { url: string; owner?: string }): boolean {
+    const targetKey = canonicalCalendarUrlKey(candidate.url);
+    const targetSig = sogoCalendarSignature(candidate.url, candidate.owner);
+    return calendars.value.some((c) => {
+      if (targetKey && canonicalCalendarUrlKey(c.url) === targetKey) return true;
+      if (targetSig) {
+        const cSig = sogoCalendarSignature(c.url, c.owner);
+        if (cSig && cSig === targetSig) return true;
+      }
+      return false;
+    });
+  }
+
+  async function searchSharedCalendars(
+    query: string,
+    candidateEmails?: string[]
+  ): Promise<SharedCalendarSearchResult[]> {
+    if (session.value?.mode !== 'CALDAV') return [];
+    return apiSearchSharedCalendars(query, candidateEmails);
+  }
+
+  async function subscribeSharedCalendar(
+    item: SharedCalendarSearchResult
+  ): Promise<CalendarSource | null> {
+    if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return null;
+    if (!isOnline.value) {
+      notify('Offline', 'Du skal være online for at tilføje en delt kalender.', 'warning');
+      return null;
+    }
+
+    try {
+      const res = await apiSubscribeSharedCalendar({
+        calendarUrl: item.url,
+        owner: item.owner,
+        name: item.name,
+        color: item.color
+      });
+
+      if (hiddenCalendarIds.value.includes(res.calendar.id)) {
+        hiddenCalendarIds.value = hiddenCalendarIds.value.filter((id) => id !== res.calendar.id);
+        persistHiddenCalendars();
+      }
+
+      const newCal: CalendarSource = clonePlain({ ...res.calendar, visible: true });
+      applyColorOverridesToCalendars([newCal]);
+      applyNameOverridesToCalendars([newCal]);
+
+      const newCalKey = canonicalCalendarUrlKey(newCal.url);
+      const existingIdx = calendars.value.findIndex(
+        (c) => c.id === newCal.id || (newCalKey && canonicalCalendarUrlKey(c.url) === newCalKey)
+      );
+      if (existingIdx !== -1) {
+        calendars.value[existingIdx] = newCal;
+      } else {
+        calendars.value.push(newCal);
+      }
+
+      const importedEvents = clonePlain(res.events || []);
+      const otherEvents = events.value.filter((e) => e.calendarId !== newCal.id);
+      events.value = [...otherEvents, ...importedEvents];
+
+      await db.transaction('rw', db.calendars, db.events, async () => {
+        await db.calendars.put(clonePlain(newCal));
+        const oldIds = await db.events.where('calendarId').equals(newCal.id).primaryKeys();
+        if (oldIds.length > 0) {
+          await db.events.bulkDelete(oldIds);
+        }
+        if (importedEvents.length > 0) {
+          await db.events.bulkPut(importedEvents);
+        }
+      });
+
+      if (dismissedSharedCount.value > 0) {
+        dismissedSharedCount.value = Math.max(0, dismissedSharedCount.value - 1);
+      }
+
+      notify(
+        'Delt kalender tilføjet!',
+        `"${newCal.name}" er nu tilføjet (${newCal.readOnly ? 'Kun læsning' : 'Læs & Skriv'}).`,
+        'success'
+      );
+      return newCal;
+    } catch (err: any) {
+      notify('Kunne ikke tilføje delt kalender', err?.message || String(err), 'error', 7000);
+      return null;
     }
   }
 
@@ -757,7 +923,16 @@ export const useCalendarStore = defineStore('calendar', () => {
         recipientEmail: params.recipientEmail.trim(),
         permission: params.permission
       });
-      const idx = userShares.value.findIndex((s) => s.id === saved.id);
+      userSharesRequestSeq += 1;
+      isLoadingUserShares.value = false;
+      const savedKey = canonicalCalendarUrlKey(saved.calendarUrl);
+      const savedRecipLower = saved.recipientEmail.toLowerCase().trim();
+      const idx = userShares.value.findIndex(
+        (s) =>
+          s.id === saved.id ||
+          (canonicalCalendarUrlKey(s.calendarUrl) === savedKey &&
+            s.recipientEmail.toLowerCase().trim() === savedRecipLower)
+      );
       if (idx >= 0) {
         userShares.value[idx] = saved;
       } else {
@@ -791,6 +966,8 @@ export const useCalendarStore = defineStore('calendar', () => {
           ? { calendarName: existing.calendarName, calendarColor: existing.calendarColor }
           : undefined
       );
+      userSharesRequestSeq += 1;
+      isLoadingUserShares.value = false;
       const idx = userShares.value.findIndex((s) => s.id === shareId);
       if (idx >= 0) {
         userShares.value[idx] = { ...userShares.value[idx], ...updated };
@@ -811,6 +988,8 @@ export const useCalendarStore = defineStore('calendar', () => {
     if (session.value?.mode !== 'CALDAV') return;
     try {
       await apiDeleteUserShare(shareId);
+      userSharesRequestSeq += 1;
+      isLoadingUserShares.value = false;
       userShares.value = userShares.value.filter((s) => s.id !== shareId);
       notify(
         shareId.startsWith('sogo::') ? 'Adgang tilbagekaldt i SOGo' : 'Adgang tilbagekaldt',
@@ -2305,6 +2484,10 @@ export const useCalendarStore = defineStore('calendar', () => {
     openShareModal,
     loadShares,
     loadUserShares,
+    getOutgoingSharesForCalendar,
+    isSharedCalendarAlreadyAdded,
+    searchSharedCalendars,
+    subscribeSharedCalendar,
     shareCalendarWithUser,
     updateUserSharePermission,
     revokeUserShare,

@@ -5,8 +5,11 @@ import {
   type CalDavCredentials,
   type CalendarInfoDTO,
   fetchCalendars,
+  fetchOwnCalendarsFast,
   fetchSingleCalendarByUrl,
   verifyAndFetchSharedCalendar,
+  fetchUserSharedCalendarsForOwner,
+  searchSogoSharedCalendarsByOwnerQuery,
   canonicalSogoCalendarSignature,
   fetchAllEvents,
   saveCalDavEvent,
@@ -34,6 +37,7 @@ import {
 import {
   type CalendarSharePermission,
   listOutgoingUserShares,
+  listOutgoingSogoShareHints,
   upsertUserCalendarShare,
   updateUserCalendarSharePermission,
   deleteUserCalendarShare,
@@ -55,7 +59,8 @@ import {
   updateSogoCalendarSharePermission,
   revokeSogoCalendarShare,
   subscribeToSogoSharedCalendar,
-  unsubscribeFromSogoSharedCalendar
+  unsubscribeFromSogoSharedCalendar,
+  searchSogoUsers
 } from '../services/sogoAclService.js';
 import {
   getCalendarNameOverrides,
@@ -140,6 +145,9 @@ const publicShareLimiter = createRateLimiter(
   60 * 1000,
   'For mange forespørgsler. Prøv igen om et øjeblik.'
 );
+
+const SEARCH_EMAIL_REGEX =
+  /^[^\s@/\\:<>()[\],;"]+@[^\s@/\\:<>()[\],;"]+\.[a-zA-Z0-9-]{2,}$/;
 
 function sendCompressedJson(req: Request, res: Response, payload: unknown) {
   const jsonStr = JSON.stringify(payload);
@@ -331,7 +339,7 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
               return { cal, evs };
             } catch (err: any) {
               const msg = String(err?.message || err);
-              if (/HTTP (?:401|403|404)\b/.test(msg)) {
+              if (/HTTP (?:403|404)\b/.test(msg)) {
                 removeUserCalendarShareByTarget(
                   hint.ownerUsername,
                   hint.calendarUrl,
@@ -897,17 +905,43 @@ caldavRouter.get('/user-shares', async (req: Request, res: Response) => {
 
   let ownCalendars: CalendarInfoDTO[] = [];
   try {
-    ownCalendars = await fetchCalendars(creds);
-    const savedNameOverrides = getCalendarNameOverrides(creds.username);
-    for (const cal of ownCalendars) {
-      const alias = resolveCalendarNameOverride(savedNameOverrides, cal.id, cal.url);
-      if (alias) cal.name = alias;
-    }
-  } catch {
+    ownCalendars = await fetchOwnCalendarsFast(creds);
+  } catch (fastErr: any) {
+    console.warn('Hurtig kalenderhentning til delinger fejlede, prøver fuld fetch:', fastErr?.message || fastErr);
     ownCalendars = [];
   }
 
-  const sogoShares = await listSogoCalendarShares(creds, ownCalendars).catch(() => []);
+  if (ownCalendars.length === 0) {
+    try {
+      ownCalendars = (await fetchCalendars(creds)).filter((c) => !c.isShared);
+    } catch {
+      ownCalendars = [];
+    }
+  }
+
+  const savedNameOverrides = getCalendarNameOverrides(creds.username);
+  for (const cal of ownCalendars) {
+    const alias = resolveCalendarNameOverride(savedNameOverrides, cal.id, cal.url);
+    if (alias) cal.name = alias;
+  }
+
+  const sogoHints = listOutgoingSogoShareHints(creds.username);
+  const { shares: sogoShares, staleHints } = await listSogoCalendarShares(
+    creds,
+    ownCalendars,
+    sogoHints
+  ).catch((err) => {
+    console.warn('listSogoCalendarShares fejlede:', err?.message || err);
+    return {
+      shares: [],
+      staleHints: [] as Array<{ calendarUrl: string; recipientEmail: string }>
+    };
+  });
+
+  for (const stale of staleHints) {
+    removeUserCalendarShareByTarget(creds.username, stale.calendarUrl, stale.recipientEmail);
+  }
+
   const sogoKeySet = new Set<string>();
   for (const s of sogoShares) {
     sogoKeySet.add(`${canonicalCalKey(s.calendarUrl)}::${s.recipientEmail.toLowerCase().trim()}`);
@@ -923,6 +957,259 @@ caldavRouter.get('/user-shares', async (req: Request, res: Response) => {
     .map((ls) => ({ ...ls, source: 'suite' as const }));
 
   res.json({ ok: true, userShares: [...sogoShares, ...legacyShares] });
+});
+
+/**
+ * POST /api/caldav/shared-search
+ * Søger delte kalendere i Mailcow/SOGo ud fra brugernavn, e-mailadresse eller kontakter.
+ */
+caldavRouter.post('/shared-search', async (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const query = String(req.body?.query || '').trim().slice(0, 120);
+    const rawCandidateEmails = Array.isArray(req.body?.candidateEmails)
+      ? (req.body.candidateEmails as unknown[])
+      : [];
+
+    const identityEmails = getCallerIdentityEmails(creds.username);
+    const identitySet = new Set(identityEmails);
+    const identityLocalParts = new Set(identityEmails.map((e) => e.split('@')[0]));
+
+    const ownerCandidateMap = new Map<string, { email: string; displayName?: string }>();
+    const addOwnerCandidate = (rawEmail: string, displayName?: string) => {
+      const clean = rawEmail.trim();
+      if (!clean) return;
+      const lower = clean.toLowerCase();
+      if (identitySet.has(lower) || identityLocalParts.has(lower)) return;
+      const existing = ownerCandidateMap.get(lower);
+      if (existing) {
+        if (!existing.displayName && displayName) {
+          existing.displayName = displayName;
+        }
+        return;
+      }
+      if (ownerCandidateMap.size >= 15) return;
+      ownerCandidateMap.set(lower, { email: clean, displayName });
+    };
+
+    if (query && SEARCH_EMAIL_REGEX.test(query)) {
+      addOwnerCandidate(query);
+    }
+
+    if (query.length >= 2) {
+      const sogoUsers = await searchSogoUsers(creds, query).catch(() => []);
+      for (const u of sogoUsers) {
+        addOwnerCandidate(u.email || u.uid, u.displayName);
+      }
+
+      if (!query.includes('@') && /^[a-z0-9._+-]{2,64}$/i.test(query)) {
+        const domains = Array.from(
+          new Set(identityEmails.map((e) => e.split('@')[1]).filter(Boolean))
+        );
+        for (const dom of domains) {
+          addOwnerCandidate(`${query.toLowerCase()}@${dom}`);
+        }
+      }
+    }
+
+    let contactCount = 0;
+    for (const rawEmail of rawCandidateEmails) {
+      if (contactCount >= 8) break;
+      if (typeof rawEmail !== 'string') continue;
+      const trimmed = rawEmail.trim();
+      if (SEARCH_EMAIL_REGEX.test(trimmed)) {
+        addOwnerCandidate(trimmed);
+        contactCount++;
+      }
+    }
+
+    const incomingHints = resolveIncomingSogoHintsForRecipient(identityEmails);
+    const qLower = query.toLowerCase();
+    const matchingHints = qLower
+      ? incomingHints.filter(
+          (h) =>
+            h.ownerUsername.toLowerCase().includes(qLower) ||
+            h.calendarName.toLowerCase().includes(qLower) ||
+            h.calendarUrl.toLowerCase().includes(qLower)
+        )
+      : incomingHints;
+
+    for (const h of matchingHints) {
+      addOwnerCandidate(h.ownerUsername);
+    }
+
+    const ownerList = Array.from(ownerCandidateMap.values());
+    const [ownerResults, collectionItems, hintResults] = await Promise.all([
+      Promise.allSettled(ownerList.map((o) => fetchUserSharedCalendarsForOwner(creds, o.email))),
+      query.length >= 2
+        ? searchSogoSharedCalendarsByOwnerQuery(creds, query).catch(() => [])
+        : Promise.resolve([]),
+      Promise.allSettled(
+        matchingHints.map((h) =>
+          verifyAndFetchSharedCalendar(creds, h.calendarUrl, h.calendarName, h.calendarColor)
+        )
+      )
+    ]);
+
+    const discoveredMap = new Map<string, CalendarInfoDTO>();
+    const recordFound = (cal: CalendarInfoDTO) => {
+      const ownerLower = (cal.owner || '').toLowerCase().trim();
+      if (ownerLower && (identitySet.has(ownerLower) || identityLocalParts.has(ownerLower))) {
+        return;
+      }
+      const dedupKey =
+        canonicalSogoCalendarSignature(cal.url, cal.owner) || canonicalCalKey(cal.url);
+      const existing = discoveredMap.get(dedupKey);
+      if (!existing || (existing.readOnly && !cal.readOnly)) {
+        discoveredMap.set(dedupKey, cal);
+      }
+    };
+
+    for (const r of ownerResults) {
+      if (r.status === 'fulfilled') {
+        for (const cal of r.value) recordFound(cal);
+      }
+    }
+    for (const hr of hintResults) {
+      if (hr.status === 'fulfilled' && hr.value) {
+        recordFound(hr.value);
+      }
+    }
+
+    const missingCollectionItems = collectionItems.filter((item) => {
+      const sig = canonicalSogoCalendarSignature(item.url, item.owner);
+      const key = sig || canonicalCalKey(item.url);
+      return !discoveredMap.has(key);
+    });
+
+    if (missingCollectionItems.length > 0) {
+      const verifiedCollection = await Promise.allSettled(
+        missingCollectionItems.map((item) =>
+          verifyAndFetchSharedCalendar(creds, item.url, item.displayName)
+        )
+      );
+      for (const vc of verifiedCollection) {
+        if (vc.status === 'fulfilled' && vc.value) {
+          recordFound(vc.value);
+        }
+      }
+    }
+
+    const savedNameOverrides = getCalendarNameOverrides(creds.username);
+    const results = Array.from(discoveredMap.values())
+      .map((cal) => {
+        const ownerKey = (cal.owner || '').toLowerCase().trim();
+        const ownerInfo = ownerKey ? ownerCandidateMap.get(ownerKey) : undefined;
+        const alias = resolveCalendarNameOverride(savedNameOverrides, cal.id, cal.url);
+        return {
+          url: cal.url,
+          name: alias || cal.name,
+          color: cal.color || cal.serverColor || '#2563eb',
+          owner: cal.owner,
+          ownerDisplayName: ownerInfo?.displayName,
+          readOnly: cal.readOnly,
+          sharePermission: (cal.readOnly ? 'read' : 'write') as CalendarSharePermission,
+          description: cal.description
+        };
+      })
+      .sort((a, b) => {
+        const ownerCmp = (a.owner || '').localeCompare(b.owner || '', 'da');
+        return ownerCmp !== 0 ? ownerCmp : a.name.localeCompare(b.name, 'da');
+      });
+
+    res.json({ ok: true, calendars: results });
+  } catch (err: any) {
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke søge efter delte kalendere i SOGo.'
+    });
+  }
+});
+
+/**
+ * POST /api/caldav/shared-subscribe
+ * Abonnerer og tilføjer en fundet delt SOGo-kalender til brugerens konto.
+ */
+caldavRouter.post('/shared-subscribe', async (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const calendarUrl = String(req.body?.calendarUrl || '').trim();
+    const owner = String(req.body?.owner || '').trim() || undefined;
+    const name = String(req.body?.name || '').trim() || undefined;
+    const color = String(req.body?.color || '').trim() || undefined;
+
+    if (!calendarUrl) {
+      res.status(400).json({ ok: false, error: 'calendarUrl mangler.' });
+      return;
+    }
+
+    let cal: CalendarInfoDTO | null = null;
+    try {
+      cal = await verifyAndFetchSharedCalendar(creds, calendarUrl, name, color);
+    } catch (verifyErr: any) {
+      const msg = String(verifyErr?.message || verifyErr);
+      if (/HTTP (?:401|403|404)\b/.test(msg)) {
+        const statusCode = msg.includes('HTTP 404') ? 404 : 403;
+        res.status(statusCode).json({
+          ok: false,
+          error: 'Du har ikke adgang til denne kalender i SOGo.'
+        });
+        return;
+      }
+      throw verifyErr;
+    }
+
+    if (!cal) {
+      res.status(404).json({ ok: false, error: 'Kalenderen blev ikke fundet i SOGo.' });
+      return;
+    }
+
+    cal.isShared = true;
+    cal.owner = cal.owner || owner;
+    cal.sharePermission = cal.readOnly ? 'read' : 'write';
+
+    const subscribedInSogo = await subscribeToSogoSharedCalendar(creds, cal.url).catch(() => false);
+    removeDismissedSharedCalendar(creds.username, cal.url);
+    if (calendarUrl !== cal.url) {
+      removeDismissedSharedCalendar(creds.username, calendarUrl);
+    }
+
+    if (cal.owner) {
+      upsertSogoShareHint({
+        ownerUsername: cal.owner,
+        ownerServerUrl: creds.serverUrl,
+        calendarUrl: cal.url,
+        calendarName: cal.name,
+        calendarColor: cal.color,
+        recipientEmail: creds.username,
+        permission: cal.readOnly ? 'read' : 'write'
+      });
+    }
+
+    const savedNameOverrides = getCalendarNameOverrides(creds.username);
+    cal.serverName = cal.serverName || cal.name;
+    const alias = resolveCalendarNameOverride(savedNameOverrides, cal.id, cal.url);
+    if (alias) {
+      cal.name = alias;
+      cal.localNameOverride = alias;
+    } else {
+      cal.localNameOverride = null;
+    }
+
+    const events = await fetchAllEvents(creds, [cal]);
+
+    res.json({
+      ok: true,
+      calendar: cal,
+      events,
+      subscribedInSogo
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke tilføje den delte kalender.'
+    });
+  }
 });
 
 /**
