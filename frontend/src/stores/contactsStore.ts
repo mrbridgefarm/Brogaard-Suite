@@ -6,6 +6,7 @@ import type { AddressBook, Contact } from '../types/contacts';
 import {
   apiSyncCardDav,
   apiSaveContact,
+  apiToggleContactFavorite,
   apiDeleteContact,
   apiImportVcf,
   apiExportVcf
@@ -59,11 +60,17 @@ export const useContactsStore = defineStore('contacts', () => {
     () => contacts.value.filter((c) => Boolean(c.birthday && /^\d{4}-\d{2}-\d{2}/.test(c.birthday))).length
   );
 
+  const favoritesCount = computed<number>(
+    () => contacts.value.filter((c) => Boolean(c.starred)).length
+  );
+
   const filteredContacts = computed<Contact[]>(() => {
     const q = searchQuery.value.trim().toLowerCase();
     return contacts.value
       .filter((c) => {
-        if (
+        if (selectedAddressBookId.value === 'FAVORITES') {
+          if (!c.starred) return false;
+        } else if (
           selectedAddressBookId.value !== 'ALL' &&
           c.addressBookId !== selectedAddressBookId.value
         ) {
@@ -205,7 +212,9 @@ export const useContactsStore = defineStore('contacts', () => {
       address: { street: '', city: '', postalCode: '', country: '' },
       website: '',
       notes: '',
-      categories: []
+      categories: [],
+      starred: selectedAddressBookId.value === 'FAVORITES',
+      photoDataUrl: undefined
     };
     isContactModalOpen.value = true;
   }
@@ -216,7 +225,8 @@ export const useContactsStore = defineStore('contacts', () => {
       emails: contact.emails.length > 0 ? contact.emails : [{ type: 'home', value: '' }],
       phones: contact.phones.length > 0 ? contact.phones : [{ type: 'mobile', value: '' }],
       address: contact.address || { street: '', city: '', postalCode: '', country: '' },
-      categories: contact.categories || []
+      categories: contact.categories || [],
+      starred: Boolean(contact.starred)
     });
     isContactModalOpen.value = true;
   }
@@ -265,6 +275,60 @@ export const useContactsStore = defineStore('contacts', () => {
     } finally {
       isSaving.value = false;
     }
+  }
+
+  async function toggleFavorite(contact: Contact): Promise<void> {
+    const idx = contacts.value.findIndex((c) => c.id === contact.id);
+    if (idx === -1) return;
+
+    const prevStarred = Boolean(contacts.value[idx].starred);
+    const nextStarred = !prevStarred;
+
+    const optimistic: Contact = toPlainObject({
+      ...contacts.value[idx],
+      starred: nextStarred
+    });
+    contacts.value[idx] = optimistic;
+    await db.contacts.put(optimistic).catch(() => {});
+
+    try {
+      const canWriteVcard = !isAddressBookReadOnly(optimistic.addressBookId);
+      const res = await apiToggleContactFavorite(
+        optimistic.id,
+        nextStarred,
+        canWriteVcard ? optimistic : undefined
+      );
+      if (res.contact) {
+        const plainSaved = toPlainObject({ ...res.contact, starred: nextStarred });
+        const curIdx = contacts.value.findIndex((c) => c.id === optimistic.id || c.id === plainSaved.id);
+        if (curIdx !== -1) {
+          contacts.value[curIdx] = plainSaved;
+        }
+        await db.contacts.put(plainSaved).catch(() => {});
+      }
+    } catch (err: any) {
+      const revertIdx = contacts.value.findIndex((c) => c.id === contact.id);
+      if (revertIdx !== -1) {
+        const reverted = toPlainObject({ ...contacts.value[revertIdx], starred: prevStarred });
+        contacts.value[revertIdx] = reverted;
+        await db.contacts.put(reverted).catch(() => {});
+      }
+      suiteStore.notify(
+        'Kunne ikke opdatere favorit',
+        err?.message || 'Prøv igen om et øjeblik.',
+        'error'
+      );
+    }
+  }
+
+  async function updateContactPhotoQuick(
+    contact: Contact,
+    photoDataUrl: string | null
+  ): Promise<Contact | null> {
+    return saveContact({
+      ...toPlainObject(contact),
+      photoDataUrl
+    });
   }
 
   async function deleteContact(contact: Contact): Promise<boolean> {
@@ -358,7 +422,11 @@ export const useContactsStore = defineStore('contacts', () => {
     const results: Array<{ name: string; email: string; organization?: string }> = [];
     const seenEmails = new Set<string>();
 
-    for (const c of contacts.value) {
+    const prioritized = [...contacts.value].sort(
+      (a, b) => Number(Boolean(b.starred)) - Number(Boolean(a.starred))
+    );
+
+    for (const c of prioritized) {
       for (const em of c.emails || []) {
         const addr = em.value.trim();
         if (!addr || seenEmails.has(addr.toLowerCase())) continue;
@@ -406,6 +474,7 @@ export const useContactsStore = defineStore('contacts', () => {
     defaultWritableAddressBook,
     allCategories,
     contactsWithBirthdaysCount,
+    favoritesCount,
     filteredContacts,
     selectedContact,
     getAddressBookById,
@@ -415,6 +484,8 @@ export const useContactsStore = defineStore('contacts', () => {
     openCreateContactModal,
     openEditContactModal,
     saveContact,
+    toggleFavorite,
+    updateContactPhotoQuick,
     deleteContact,
     importVcfFile,
     exportContactsVcf,

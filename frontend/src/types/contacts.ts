@@ -45,7 +45,8 @@ export interface Contact {
   website?: string;
   notes?: string;
   categories: string[];
-  photoDataUrl?: string;
+  starred?: boolean;
+  photoDataUrl?: string | null;
   vcardUrl?: string;
   etag?: string;
   rawVcard?: string;

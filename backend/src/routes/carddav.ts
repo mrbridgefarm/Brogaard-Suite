@@ -12,8 +12,32 @@ import {
 } from '../services/carddavClient.js';
 import { normalizeDanishText } from '../services/icalMapper.js';
 import { requireDavCredentials } from '../services/sessionAuth.js';
+import {
+  canonicalContactPrefKey,
+  getUserContactPrefs,
+  setUserContactFavorite,
+  clearUserContactUnstarOverride
+} from '../services/contactPrefsStore.js';
 
 export const carddavRouter = Router();
+
+function applyFavoritePrefsToContacts(username: string, contacts: ContactDTO[]): ContactDTO[] {
+  const prefs = getUserContactPrefs(username);
+  const favSet = new Set(prefs.favoriteContacts);
+  const unstarSet = new Set(prefs.unstarredOverrides);
+
+  return contacts.map((c) => {
+    const key = canonicalContactPrefKey(c.id);
+    const uidKey = c.uid ? canonicalContactPrefKey(c.uid) : '';
+    const isUnstarredOverride = unstarSet.has(key) || (Boolean(uidKey) && unstarSet.has(uidKey));
+    const isFavPref = favSet.has(key) || (Boolean(uidKey) && favSet.has(uidKey));
+    const starred = isFavPref ? true : isUnstarredOverride ? false : Boolean(c.starred);
+    return {
+      ...c,
+      starred
+    };
+  });
+}
 
 function sendCompressedJson(req: Request, res: Response, payload: unknown) {
   const jsonStr = JSON.stringify(payload);
@@ -38,7 +62,8 @@ carddavRouter.post('/sync', async (req: Request, res: Response) => {
   try {
     const creds = requireDavCredentials(req);
     const addressBooks = await fetchAddressBooks(creds);
-    const contacts = await fetchAllContacts(creds, addressBooks);
+    const rawContacts = await fetchAllContacts(creds, addressBooks);
+    const contacts = applyFavoritePrefsToContacts(creds.username, rawContacts);
 
     sendCompressedJson(req, res, {
       ok: true,
@@ -76,12 +101,71 @@ carddavRouter.post('/contacts', async (req: Request, res: Response) => {
     }
 
     const saved = await saveCardDavContact(creds, contact);
+    if (typeof contact.starred === 'boolean') {
+      setUserContactFavorite(creds.username, saved.id, contact.starred);
+      if (saved.uid) {
+        setUserContactFavorite(creds.username, saved.uid, contact.starred);
+      }
+      if (contact.starred) {
+        clearUserContactUnstarOverride(creds.username, saved.id);
+      }
+      saved.starred = contact.starred;
+    }
     res.json({ ok: true, contact: saved });
   } catch (err: any) {
     console.error('Fejl ved gem af CardDAV kontakt:', err?.message || err);
     res.status(500).json({
       ok: false,
       error: err?.message || 'Kunne ikke gemme kontakten på CardDAV-serveren.'
+    });
+  }
+});
+
+/**
+ * POST /api/carddav/favorite
+ * Markerer eller fjerner en kontakt som favorit (gemmes både i CardDAV Starred-tag hvis skrivbar og i brugerpræferencer).
+ */
+carddavRouter.post('/favorite', async (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const contactId = String(req.body?.contactId || '').trim();
+    const starred = Boolean(req.body?.starred);
+    const contact = req.body?.contact as ContactDTO | undefined;
+
+    if (!contactId && !contact?.id) {
+      res.status(400).json({ ok: false, error: 'contactId mangler.' });
+      return;
+    }
+
+    const effectiveId = contactId || String(contact?.id || '');
+    setUserContactFavorite(creds.username, effectiveId, starred);
+    if (contact?.uid) {
+      setUserContactFavorite(creds.username, contact.uid, starred);
+    }
+
+    let updatedContact: ContactDTO | undefined;
+    if (contact && contact.addressBookId && contact.vcardUrl) {
+      try {
+        updatedContact = await saveCardDavContact(creds, {
+          ...contact,
+          starred
+        });
+        updatedContact.starred = starred;
+      } catch {
+        // Skrivebeskyttet adressebog (f.eks. Global Adressebog): brugerpræferencen er allerede gemt
+      }
+    }
+
+    res.json({
+      ok: true,
+      starred,
+      contact: updatedContact
+    });
+  } catch (err: any) {
+    console.error('Fejl ved opdatering af favorit-kontakt:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke opdatere favorit-status.'
     });
   }
 });

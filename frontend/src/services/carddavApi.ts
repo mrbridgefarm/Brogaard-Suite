@@ -35,6 +35,27 @@ export async function apiSaveContact(contact: Contact): Promise<Contact> {
   return data.contact as Contact;
 }
 
+export async function apiToggleContactFavorite(
+  contactId: string,
+  starred: boolean,
+  contact?: Contact
+): Promise<{ starred: boolean; contact?: Contact }> {
+  const res = await fetch('/api/carddav/favorite', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ contactId, starred, contact })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke opdatere favorit-status.');
+  }
+  return {
+    starred: Boolean(data.starred),
+    contact: data.contact as Contact | undefined
+  };
+}
+
 export async function apiDeleteContact(vcardUrl: string, etag?: string): Promise<void> {
   const res = await fetch('/api/carddav/contacts', {
     method: 'DELETE',

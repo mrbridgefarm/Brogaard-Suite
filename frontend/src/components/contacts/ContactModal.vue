@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { X, Users, Plus, Trash2, Save } from 'lucide-vue-next';
+import { X, Users, Plus, Trash2, Save, Star, Camera, ImagePlus } from 'lucide-vue-next';
 import { useContactsStore } from '../../stores/contactsStore';
+import { useSuiteStore } from '../../stores/suiteStore';
+import { processContactPhotoFile } from '../../utils/contactPhoto';
 import type { ContactEmail, ContactPhone } from '../../types/contacts';
 
 const store = useContactsStore();
+const suiteStore = useSuiteStore();
 
 const addressBookId = ref('');
 const firstName = ref('');
@@ -23,8 +26,25 @@ const country = ref('');
 const categoriesText = ref('');
 const website = ref('');
 const notes = ref('');
+const starred = ref(false);
+const photoDataUrl = ref<string | null | undefined>(undefined);
+const isProcessingPhoto = ref(false);
+const isDraggingPhoto = ref(false);
 
 const isExisting = computed(() => Boolean(store.editingContact?.id));
+
+const previewInitials = computed(() => {
+  const composed =
+    fullName.value.trim() ||
+    [firstName.value.trim(), lastName.value.trim()].filter(Boolean).join(' ').trim() ||
+    organization.value.trim();
+  if (!composed) return '?';
+  const parts = composed.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  }
+  return composed.slice(0, 2).toUpperCase();
+});
 
 watch(
   () => store.editingContact,
@@ -53,9 +73,47 @@ watch(
     categoriesText.value = (c.categories || []).join(', ');
     website.value = c.website || '';
     notes.value = c.notes || '';
+    starred.value = Boolean(c.starred);
+    photoDataUrl.value = c.photoDataUrl;
   },
   { immediate: true }
 );
+
+async function applyPhotoFile(file: File) {
+  isProcessingPhoto.value = true;
+  try {
+    photoDataUrl.value = await processContactPhotoFile(file);
+  } catch (err: any) {
+    suiteStore.notify(
+      'Billedfejl',
+      err?.message || 'Kunne ikke indlæse det valgte billede.',
+      'error'
+    );
+  } finally {
+    isProcessingPhoto.value = false;
+  }
+}
+
+function handlePhotoInput(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (file) {
+    void applyPhotoFile(file);
+  }
+}
+
+function handlePhotoDrop(e: DragEvent) {
+  isDraggingPhoto.value = false;
+  const file = e.dataTransfer?.files?.[0];
+  if (file) {
+    void applyPhotoFile(file);
+  }
+}
+
+function removePhoto() {
+  photoDataUrl.value = null;
+}
 
 function addEmailRow() {
   emails.value.push({ type: 'work', value: '' });
@@ -119,7 +177,8 @@ async function handleSubmit() {
     website: website.value.trim() || undefined,
     notes: notes.value.trim() || undefined,
     categories,
-    photoDataUrl: store.editingContact?.photoDataUrl,
+    starred: starred.value,
+    photoDataUrl: photoDataUrl.value,
     vcardUrl: store.editingContact?.vcardUrl,
     etag: store.editingContact?.etag,
     rawVcard: store.editingContact?.rawVcard
@@ -155,6 +214,88 @@ async function handleSubmit() {
         </div>
 
         <form class="p-5 space-y-4 overflow-y-auto text-xs" @submit.prevent="handleSubmit">
+          <!-- Kontaktbillede & Favorit -->
+          <div
+            class="p-3.5 rounded-2xl bg-slate-950/80 border transition flex flex-wrap items-center justify-between gap-4"
+            :class="isDraggingPhoto ? 'border-blue-400 bg-blue-500/10' : 'border-slate-800'"
+            @dragover.prevent="isDraggingPhoto = true"
+            @dragleave.prevent="isDraggingPhoto = false"
+            @drop.prevent="handlePhotoDrop"
+          >
+            <div class="flex items-center gap-3.5">
+              <label
+                class="group relative w-16 h-16 rounded-2xl bg-blue-600/25 border border-white/15 flex items-center justify-center text-lg font-bold text-white overflow-hidden shadow cursor-pointer shrink-0"
+                title="Klik eller træk et billede hertil"
+              >
+                <img
+                  v-if="photoDataUrl"
+                  :src="photoDataUrl"
+                  alt="Kontaktbillede"
+                  class="w-full h-full object-cover"
+                />
+                <span v-else>{{ previewInitials }}</span>
+                <span
+                  class="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                >
+                  <Camera class="w-4 h-4 text-white" />
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  class="hidden"
+                  @change="handlePhotoInput"
+                />
+              </label>
+
+              <div class="space-y-1.5">
+                <div class="font-semibold text-slate-200">Kontaktbillede</div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <label
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium cursor-pointer transition"
+                  >
+                    <ImagePlus class="w-3.5 h-3.5 text-blue-400" />
+                    <span>{{ isProcessingPhoto ? 'Behandler...' : photoDataUrl ? 'Skift billede' : 'Vælg billede' }}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      class="hidden"
+                      @change="handlePhotoInput"
+                    />
+                  </label>
+                  <button
+                    v-if="photoDataUrl"
+                    type="button"
+                    class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-rose-500/20 border border-slate-800 hover:border-rose-500/40 text-slate-400 hover:text-rose-300 transition"
+                    @click="removePhoto"
+                  >
+                    <Trash2 class="w-3.5 h-3.5" />
+                    <span>Fjern</span>
+                  </button>
+                </div>
+                <p class="text-[10.5px] text-slate-500">
+                  Beskæres automatisk kvadratisk og synkroniseres til CardDAV.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border font-semibold transition"
+              :class="
+                starred
+                  ? 'bg-amber-500/20 border-amber-400/50 text-amber-200'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300'
+              "
+              @click="starred = !starred"
+            >
+              <Star
+                class="w-3.5 h-3.5"
+                :class="starred ? 'fill-amber-400 text-amber-400' : 'text-amber-300'"
+              />
+              <span>{{ starred ? 'Favorit' : 'Markér som favorit' }}</span>
+            </button>
+          </div>
+
           <!-- Adressebog (hvis flere skrivbare) -->
           <div v-if="store.writableAddressBooks.length > 1 && !isExisting">
             <label class="block text-slate-400 font-medium mb-1">Adressebog</label>

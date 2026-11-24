@@ -2,6 +2,8 @@
 import { ref } from 'vue';
 import {
   Users,
+  Star,
+  Camera,
   Mail,
   Phone,
   Building2,
@@ -21,6 +23,7 @@ import ContactsTopBar from './ContactsTopBar.vue';
 import { useContactsStore } from '../../stores/contactsStore';
 import { useSuiteStore } from '../../stores/suiteStore';
 import { useTheme } from '../../composables/useTheme';
+import { processContactPhotoFile } from '../../utils/contactPhoto';
 import type { Contact } from '../../types/contacts';
 
 const SIDEBAR_WIDTH_KEY = 'brogaard_contacts_sidebar_width_v1';
@@ -195,6 +198,24 @@ function confirmDelete(contact: Contact) {
 function countContactsInBook(bookId: string): number {
   return store.contacts.filter((c) => c.addressBookId === bookId).length;
 }
+
+async function handleQuickPhotoChange(e: Event, contact: Contact) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+
+  try {
+    const dataUrl = await processContactPhotoFile(file);
+    await store.updateContactPhotoQuick(contact, dataUrl);
+  } catch (err: any) {
+    suiteStore.notify(
+      'Kunne ikke indlæse billede',
+      err?.message || 'Vælg venligst et gyldigt billede.',
+      'error'
+    );
+  }
+}
 </script>
 
 <template>
@@ -254,6 +275,34 @@ function countContactsInBook(bookId: string): number {
                   <span class="truncate">Alle kontakter</span>
                 </span>
                 <span class="text-[10.5px] opacity-80 shrink-0">{{ store.contacts.length }}</span>
+              </button>
+
+              <!-- Separat Favoritter-knap (Starred) -->
+              <button
+                type="button"
+                class="w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 text-xs transition"
+                :class="
+                  store.selectedAddressBookId === 'FAVORITES'
+                    ? 'dav-theme-btn font-semibold shadow-sm'
+                    : 'text-slate-200 hover:bg-white/10'
+                "
+                @click="
+                  store.selectedAddressBookId =
+                    store.selectedAddressBookId === 'FAVORITES' ? 'ALL' : 'FAVORITES'
+                "
+              >
+                <span class="flex items-center gap-2 truncate">
+                  <Star
+                    class="w-3.5 h-3.5 shrink-0"
+                    :class="
+                      store.selectedAddressBookId === 'FAVORITES'
+                        ? 'fill-current text-amber-200'
+                        : 'fill-amber-400 text-amber-400'
+                    "
+                  />
+                  <span class="truncate">Favoritter</span>
+                </span>
+                <span class="text-[10.5px] opacity-80 shrink-0">{{ store.favoritesCount }}</span>
               </button>
 
               <button
@@ -358,22 +407,57 @@ function countContactsInBook(bookId: string): number {
         }"
       >
         <div
-          class="h-11 px-3.5 border-b flex items-center justify-between text-xs shrink-0"
+          class="h-11 px-3.5 border-b flex items-center justify-between gap-2 text-xs shrink-0"
           :class="currentTheme.wallpaper ? 'bg-black/25 border-white/10' : 'bg-slate-900/80 border-slate-800'"
         >
-          <span class="font-semibold text-slate-200">
-            Kontakter ({{ store.filteredContacts.length }})
+          <span class="font-semibold text-slate-200 truncate">
+            {{ store.selectedAddressBookId === 'FAVORITES' ? 'Favoritter' : 'Kontakter' }} ({{ store.filteredContacts.length }})
           </span>
-          <span v-if="store.selectedCategory !== 'ALL'" class="text-[11px] text-blue-400 truncate">
-            Tag: {{ store.selectedCategory }}
-          </span>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <span v-if="store.selectedCategory !== 'ALL'" class="text-[11px] text-blue-400 truncate max-w-[110px]">
+              Tag: {{ store.selectedCategory }}
+            </span>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition"
+              :class="
+                store.selectedAddressBookId === 'FAVORITES'
+                  ? 'bg-amber-500/20 border-amber-400/45 text-amber-200'
+                  : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10 hover:text-white'
+              "
+              :title="
+                store.selectedAddressBookId === 'FAVORITES'
+                  ? 'Vis alle kontakter'
+                  : 'Vis kun favorit-kontakter'
+              "
+              @click="
+                store.selectedAddressBookId =
+                  store.selectedAddressBookId === 'FAVORITES' ? 'ALL' : 'FAVORITES'
+              "
+            >
+              <Star
+                class="w-3 h-3"
+                :class="
+                  store.selectedAddressBookId === 'FAVORITES' || store.favoritesCount > 0
+                    ? 'fill-amber-400 text-amber-400'
+                    : 'text-slate-400'
+                "
+              />
+              <span>Favoritter</span>
+            </button>
+          </div>
         </div>
 
         <div v-if="store.filteredContacts.length === 0" class="flex-1 flex flex-col items-center justify-center p-6 text-center text-xs text-slate-400 space-y-3">
-          <Users class="w-8 h-8 text-slate-600" />
+          <Star v-if="store.selectedAddressBookId === 'FAVORITES'" class="w-8 h-8 text-amber-400/60" />
+          <Users v-else class="w-8 h-8 text-slate-600" />
           <p v-if="store.searchQuery">Ingen kontakter matcher "{{ store.searchQuery }}".</p>
+          <p v-else-if="store.selectedAddressBookId === 'FAVORITES'">
+            Du har ingen favoritter endnu. Klik på stjernen ud for en kontakt for at føje den til Favoritter.
+          </p>
           <p v-else>Ingen kontakter fundet i denne adressebog.</p>
           <button
+            v-if="store.selectedAddressBookId !== 'FAVORITES'"
             type="button"
             class="px-3 py-1.5 rounded-lg dav-theme-btn text-xs font-semibold flex items-center gap-1.5"
             @click="store.openCreateContactModal()"
@@ -383,17 +467,19 @@ function countContactsInBook(bookId: string): number {
         </div>
 
         <div v-else class="flex-1 overflow-y-auto divide-y divide-white/5">
-          <button
+          <div
             v-for="contact in store.filteredContacts"
             :key="contact.id"
-            type="button"
-            class="w-full px-3.5 py-2.5 text-left flex items-center gap-3 transition"
+            role="button"
+            tabindex="0"
+            class="group w-full px-3.5 py-2.5 text-left flex items-center gap-3 transition cursor-pointer focus:outline-none"
             :class="
               store.selectedContactId === contact.id
                 ? 'bg-blue-600/20 border-l-2 border-l-blue-400'
                 : 'hover:bg-white/5 border-l-2 border-l-transparent'
             "
             @click="store.selectedContactId = contact.id"
+            @keydown.enter.prevent="store.selectedContactId = contact.id"
           >
             <div
               class="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-xs font-bold text-white overflow-hidden shadow-sm border border-white/15"
@@ -413,11 +499,30 @@ function countContactsInBook(bookId: string): number {
                 <span class="text-xs font-semibold text-slate-100 truncate">
                   {{ contact.fullName }}
                 </span>
-                <Cake
-                  v-if="contact.birthday"
-                  class="w-3 h-3 text-pink-400 shrink-0"
-                  :title="`Fødselsdag: ${contact.birthday}`"
-                />
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <Cake
+                    v-if="contact.birthday"
+                    class="w-3 h-3 text-pink-400 shrink-0"
+                    :title="`Fødselsdag: ${contact.birthday}`"
+                  />
+                  <button
+                    type="button"
+                    class="p-0.5 rounded-md transition"
+                    :class="
+                      contact.starred
+                        ? 'text-amber-400 opacity-100'
+                        : 'text-slate-500 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-amber-300'
+                    "
+                    :title="contact.starred ? 'Fjern fra favoritter' : 'Markér som favorit'"
+                    :aria-label="contact.starred ? 'Fjern fra favoritter' : 'Markér som favorit'"
+                    @click.stop="store.toggleFavorite(contact)"
+                  >
+                    <Star
+                      class="w-3.5 h-3.5"
+                      :class="contact.starred ? 'fill-amber-400 text-amber-400' : ''"
+                    />
+                  </button>
+                </div>
               </div>
               <div class="text-[11px] text-slate-400 truncate">
                 {{
@@ -428,7 +533,7 @@ function countContactsInBook(bookId: string): number {
                 }}
               </div>
             </div>
-          </button>
+          </div>
         </div>
       </section>
 
@@ -473,7 +578,33 @@ function countContactsInBook(bookId: string): number {
           <!-- Top Profilkort -->
           <div class="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-white/10">
             <div class="flex items-center gap-4 min-w-0">
+              <label
+                v-if="!store.isAddressBookReadOnly(store.selectedContact.addressBookId)"
+                class="group relative w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center text-xl font-bold text-white overflow-hidden shadow-lg border border-white/20 cursor-pointer"
+                :style="!store.selectedContact.photoDataUrl ? { backgroundColor: getAvatarColor(store.selectedContact.fullName) } : undefined"
+                title="Klik for at uploade eller skifte kontaktbillede"
+              >
+                <img
+                  v-if="store.selectedContact.photoDataUrl"
+                  :src="store.selectedContact.photoDataUrl"
+                  :alt="store.selectedContact.fullName"
+                  class="w-full h-full object-cover"
+                />
+                <span v-else>{{ getInitials(store.selectedContact) }}</span>
+                <span
+                  class="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                >
+                  <Camera class="w-5 h-5 text-white drop-shadow" />
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  class="hidden"
+                  @change="handleQuickPhotoChange($event, store.selectedContact)"
+                />
+              </label>
               <div
+                v-else
                 class="w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center text-xl font-bold text-white overflow-hidden shadow-lg border border-white/20"
                 :style="!store.selectedContact.photoDataUrl ? { backgroundColor: getAvatarColor(store.selectedContact.fullName) } : undefined"
               >
@@ -520,6 +651,30 @@ function countContactsInBook(bookId: string): number {
             </div>
 
             <div class="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                class="px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition"
+                :class="
+                  store.selectedContact.starred
+                    ? 'bg-amber-500/20 border-amber-400/50 text-amber-200 hover:bg-amber-500/30'
+                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                "
+                :title="
+                  store.selectedContact.starred ? 'Fjern fra favoritter' : 'Tilføj til favoritter'
+                "
+                @click="store.toggleFavorite(store.selectedContact)"
+              >
+                <Star
+                  class="w-3.5 h-3.5"
+                  :class="
+                    store.selectedContact.starred
+                      ? 'fill-amber-400 text-amber-400'
+                      : 'text-amber-300'
+                  "
+                />
+                <span>{{ store.selectedContact.starred ? 'Favorit' : 'Favorit' }}</span>
+              </button>
+
               <button
                 v-if="suiteStore.isAnyModuleEnabled('mail') && store.selectedContact.emails.length > 0"
                 type="button"

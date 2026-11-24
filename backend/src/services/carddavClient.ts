@@ -58,11 +58,33 @@ export interface ContactDTO {
   website?: string;
   notes?: string;
   categories: string[];
-  photoDataUrl?: string;
+  starred?: boolean;
+  photoDataUrl?: string | null;
   vcardUrl?: string;
   etag?: string;
   rawVcard?: string;
   updatedAt?: string;
+}
+
+const STARRED_VCARD_TAGS = new Set([
+  'starred',
+  'favorit',
+  'favoritter',
+  'favorite',
+  'favorites'
+]);
+
+function foldVcardLine(line: string, maxChars = 74): string {
+  if (line.length <= maxChars) return line;
+  const chunks: string[] = [];
+  chunks.push(line.slice(0, maxChars));
+  let offset = maxChars;
+  const contLen = maxChars - 1;
+  while (offset < line.length) {
+    chunks.push(` ${line.slice(offset, offset + contLen)}`);
+    offset += contLen;
+  }
+  return chunks.join('\r\n');
 }
 
 function canonicalAddressBookKey(rawUrl: string): string {
@@ -482,6 +504,7 @@ export function parseVcardToContacts(
     let address: ContactAddressDTO | undefined;
     let website: string | undefined;
     let notes = '';
+    let starred = false;
     const categories: string[] = [];
     const emails: ContactEmailDTO[] = [];
     const phones: ContactPhoneDTO[] = [];
@@ -590,24 +613,42 @@ export function parseVcardToContacts(
             .map((c) => unescapeVcardText(c).trim())
             .filter(Boolean);
           for (const c of cats) {
+            if (STARRED_VCARD_TAGS.has(c.toLowerCase())) {
+              starred = true;
+              continue;
+            }
             if (!categories.includes(c)) categories.push(c);
+          }
+          break;
+        }
+        case 'X-FAVORITE':
+        case 'X-STARRED': {
+          const flag = valuePart.trim().toUpperCase();
+          if (flag === 'TRUE' || flag === '1' || flag === 'YES') {
+            starred = true;
           }
           break;
         }
         case 'PHOTO': {
           const trimmedVal = valuePart.trim();
-          if (/^data:image\//i.test(trimmedVal)) {
+          if (/^data:image\//i.test(trimmedVal) && trimmedVal.length < 1_000_000) {
             photoDataUrl = trimmedVal;
           } else if (
             trimmedVal &&
-            (paramUpper.includes('ENCODING=B') || paramUpper.includes('BASE64')) &&
-            trimmedVal.length < 300000
+            !/^https?:\/\//i.test(trimmedVal) &&
+            (paramUpper.includes('ENCODING=B') ||
+              paramUpper.includes('BASE64') ||
+              /^[A-Za-z0-9+/=\s]{64,}$/.test(trimmedVal)) &&
+            trimmedVal.length < 1_000_000
           ) {
-            const mime = paramTokens.includes('PNG')
-              ? 'image/png'
-              : paramTokens.includes('WEBP')
-                ? 'image/webp'
-                : 'image/jpeg';
+            const mime =
+              paramTokens.includes('PNG') || paramUpper.includes('IMAGE/PNG')
+                ? 'image/png'
+                : paramTokens.includes('WEBP') || paramUpper.includes('IMAGE/WEBP')
+                  ? 'image/webp'
+                  : paramTokens.includes('GIF') || paramUpper.includes('IMAGE/GIF')
+                    ? 'image/gif'
+                    : 'image/jpeg';
             photoDataUrl = `data:${mime};base64,${trimmedVal.replace(/\s+/g, '')}`;
           }
           break;
@@ -649,6 +690,7 @@ export function parseVcardToContacts(
       website,
       notes: notes || undefined,
       categories,
+      starred,
       photoDataUrl,
       vcardUrl,
       etag,
@@ -738,26 +780,42 @@ export function buildVcardFromContact(contact: ContactDTO): string {
     lines.push(`URL:${safeWebsite}`);
   }
 
-  if (contact.categories && contact.categories.length > 0) {
-    const escapedCats = contact.categories
-      .map((c) => c.trim())
-      .filter(Boolean)
-      .map(escapeVcardText);
-    if (escapedCats.length > 0) {
-      lines.push(`CATEGORIES:${escapedCats.join(',')}`);
-    }
+  const mergedCategories = (contact.categories || [])
+    .map((c) => c.trim())
+    .filter((c) => Boolean(c) && !STARRED_VCARD_TAGS.has(c.toLowerCase()));
+  if (contact.starred) {
+    mergedCategories.push('Starred');
+  }
+  if (mergedCategories.length > 0) {
+    const escapedCats = mergedCategories.map(escapeVcardText);
+    lines.push(`CATEGORIES:${escapedCats.join(',')}`);
+  }
+  if (contact.starred) {
+    lines.push('X-FAVORITE:TRUE');
   }
 
   if (contact.notes?.trim()) {
     lines.push(`NOTE:${escapeVcardText(contact.notes.trim())}`);
   }
 
-  // Bevar evt. foto fra eksisterende rawVcard hvis det ikke er ændret
-  if (contact.rawVcard) {
+  // Kontaktbillede: skriv nyt/eksisterende base64-billede (RFC 2426 foldet), eller udelad hvis eksplicit fjernet (null / '')
+  if (typeof contact.photoDataUrl === 'string' && contact.photoDataUrl.trim().length > 0) {
+    const dataMatch = contact.photoDataUrl
+      .trim()
+      .match(/^data:image\/(jpeg|jpg|png|webp|gif);base64,([A-Za-z0-9+/=\s]+)$/i);
+    if (dataMatch) {
+      const rawSub = dataMatch[1].toUpperCase();
+      const vcardImgType = rawSub === 'JPG' ? 'JPEG' : rawSub;
+      const cleanBase64 = dataMatch[2].replace(/\s+/g, '');
+      if (cleanBase64.length > 0 && cleanBase64.length <= 750_000) {
+        lines.push(foldVcardLine(`PHOTO;ENCODING=b;TYPE=${vcardImgType}:${cleanBase64}`));
+      }
+    }
+  } else if (contact.photoDataUrl === undefined && contact.rawVcard) {
     const unfolded = unfoldVcardLines(contact.rawVcard);
     const photoLine = unfolded.find((l) => /^PHOTO[;:]/i.test(l.trim()));
     if (photoLine) {
-      lines.push(photoLine.trim());
+      lines.push(foldVcardLine(photoLine.trim()));
     }
   }
 
@@ -904,6 +962,7 @@ export async function saveCardDavContact(
 
   return {
     ...normalizedDto,
+    photoDataUrl: normalizedDto.photoDataUrl || undefined,
     id: `${normalizedDto.addressBookId}::${uid}`,
     vcardUrl: objectUrl,
     etag: newEtag,
