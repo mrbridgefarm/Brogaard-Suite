@@ -1,5 +1,7 @@
 export type RsvpStatus = 'NEEDS-ACTION' | 'ACCEPTED' | 'DECLINED' | 'TENTATIVE';
 
+export type CalendarSharePermission = 'read' | 'write';
+
 export type CalendarViewType =
   | 'multiMonthYear'
   | 'dayGridMonth'
@@ -23,7 +25,8 @@ export interface CalendarSource {
   serverColor: string;    // SOGo's oprindelige serverfarve
   localColorOverride?: string | null;
   readOnly: boolean;      // Låser redigering, Drag & Drop og Ctrl+V hvis true
-  isShared: boolean;      // Delt SOGo kalender
+  isShared: boolean;      // Delt SOGo/Suite kalender
+  sharePermission?: CalendarSharePermission;
   isSubscribed?: boolean; // Eksternt kalender-abonnement (.ics / webcal / Danske Helligdage)
   subscriptionUrl?: string;
   owner?: string;
@@ -115,4 +118,16 @@ export interface PublicShareLink {
   calendarNames: string[];
   hideDetails: boolean;
   createdAt: string;
+}
+
+export interface UserCalendarShare {
+  id: string;
+  ownerUsername: string;
+  calendarUrl: string;
+  calendarName: string;
+  calendarColor: string;
+  recipientEmail: string;
+  permission: CalendarSharePermission;
+  createdAt: string;
+  updatedAt: string;
 }

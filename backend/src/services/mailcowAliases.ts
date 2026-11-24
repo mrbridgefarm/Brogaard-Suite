@@ -25,7 +25,7 @@ const aliasDiscoveryCache = new Map<
   { fetchedAt: number; result: MailcowAliasDiscoveryResult }
 >();
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_REGEX = /^[^\s@/\\:<>()[\],;"]+@[^\s@/\\:<>()[\],;"]+\.[a-zA-Z0-9-]{2,}$/;
 
 function extractOkPropstatXml(xml: string): string {
   const propstats =
@@ -100,6 +100,7 @@ function parseSogoPrincipalXml(
   const addrSetXml = extractTagInnerXml(okXml, 'calendar-user-address-set');
   if (addrSetXml) {
     for (const rawHref of extractHrefs(addrSetXml)) {
+      if (!/^mailto:/i.test(rawHref)) continue;
       const stripped = rawHref.replace(/^mailto:/i, '').trim();
       let decoded = stripped;
       try {

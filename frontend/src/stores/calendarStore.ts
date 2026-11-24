@@ -14,6 +14,10 @@ import {
   apiListShares,
   apiCreateShare,
   apiDeleteShare,
+  apiListUserShares,
+  apiUpsertUserShare,
+  apiUpdateUserSharePermission,
+  apiDeleteUserShare,
   apiFetchPublicShare,
   apiImportIcs,
   apiExportIcs,
@@ -33,6 +37,8 @@ import type {
   ContextMenuState,
   RsvpStatus,
   PublicShareLink,
+  UserCalendarShare,
+  CalendarSharePermission,
   CalendarViewType
 } from '../types/calendar';
 
@@ -90,6 +96,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   const trashItems = ref<TrashItem[]>([]);
   const syncQueue = ref<SyncQueueItem[]>([]);
   const shares = ref<PublicShareLink[]>([]);
+  const userShares = ref<UserCalendarShare[]>([]);
   const publicShareError = ref<string>('');
 
   const isSyncing = ref<boolean>(false);
@@ -418,6 +425,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     calendars.value = [];
     events.value = [];
     shares.value = [];
+    userShares.value = [];
     syncQueue.value = [];
     publicShareError.value = '';
     closeContextMenu();
@@ -644,6 +652,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     preselectedShareCalendarId.value = calendarId || '';
     isShareModalOpen.value = true;
     void loadShares();
+    void loadUserShares();
   }
 
   async function loadShares() {
@@ -652,6 +661,91 @@ export const useCalendarStore = defineStore('calendar', () => {
       shares.value = await apiListShares();
     } catch (err) {
       console.warn('Kunne ikke hente delingslinks:', err);
+    }
+  }
+
+  async function loadUserShares() {
+    if (session.value?.mode !== 'CALDAV') return;
+    try {
+      userShares.value = await apiListUserShares();
+    } catch (err) {
+      console.warn('Kunne ikke hente bruger-delinger:', err);
+    }
+  }
+
+  async function shareCalendarWithUser(params: {
+    calendarId: string;
+    recipientEmail: string;
+    permission: CalendarSharePermission;
+  }): Promise<UserCalendarShare | null> {
+    if (session.value?.mode !== 'CALDAV') return null;
+    const cal = getCalendarById(params.calendarId);
+    if (!cal || cal.isShared || cal.isSubscribed || cal.id.startsWith('sub::')) {
+      notify('Ugyldig kalender', 'Vælg en af dine egne kalendere for at dele med en bruger.', 'warning');
+      return null;
+    }
+
+    try {
+      const saved = await apiUpsertUserShare({
+        calendarUrl: cal.url,
+        calendarName: cal.name,
+        calendarColor: cal.color,
+        recipientEmail: params.recipientEmail.trim(),
+        permission: params.permission
+      });
+      const idx = userShares.value.findIndex((s) => s.id === saved.id);
+      if (idx >= 0) {
+        userShares.value[idx] = saved;
+      } else {
+        userShares.value.unshift(saved);
+      }
+      notify(
+        'Kalender delt!',
+        `"${cal.name}" er nu delt med ${saved.recipientEmail} (${saved.permission === 'write' ? 'Læs & Skriv' : 'Kun læsning'}).`,
+        'success'
+      );
+      return saved;
+    } catch (err: any) {
+      notify('Kunne ikke dele kalenderen', err?.message || String(err), 'error');
+      return null;
+    }
+  }
+
+  async function updateUserSharePermission(
+    shareId: string,
+    permission: CalendarSharePermission
+  ): Promise<boolean> {
+    if (session.value?.mode !== 'CALDAV') return false;
+    try {
+      const updated = await apiUpdateUserSharePermission(shareId, permission);
+      const idx = userShares.value.findIndex((s) => s.id === shareId);
+      if (idx >= 0) {
+        userShares.value[idx] = updated;
+      }
+      notify(
+        'Rettighed opdateret',
+        `${updated.recipientEmail} har nu adgang: ${updated.permission === 'write' ? 'Læs & Skriv' : 'Kun læsning'}.`,
+        'success'
+      );
+      return true;
+    } catch (err: any) {
+      notify('Kunne ikke ændre rettighed', err?.message || String(err), 'error');
+      return false;
+    }
+  }
+
+  async function revokeUserShare(shareId: string) {
+    if (session.value?.mode !== 'CALDAV') return;
+    try {
+      await apiDeleteUserShare(shareId);
+      userShares.value = userShares.value.filter((s) => s.id !== shareId);
+      notify(
+        'Adgang tilbagekaldt',
+        'Brugeren har ikke længere adgang til denne delte kalender.',
+        'info'
+      );
+    } catch (err: any) {
+      notify('Fejl ved tilbagekaldelse', err?.message || String(err), 'error');
     }
   }
 
@@ -1909,6 +2003,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     trashItems,
     syncQueue,
     shares,
+    userShares,
     publicShareError,
     isOnline,
     isSyncing,
@@ -1955,6 +2050,10 @@ export const useCalendarStore = defineStore('calendar', () => {
     syncWithServer,
     openShareModal,
     loadShares,
+    loadUserShares,
+    shareCalendarWithUser,
+    updateUserSharePermission,
+    revokeUserShare,
     createShare,
     revokeShare,
     openImportExportModal,

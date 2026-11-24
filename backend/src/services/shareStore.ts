@@ -143,3 +143,23 @@ export function resolveShareToken(token: string): {
     return null;
   }
 }
+
+export function refreshPublicShareOwnerPassword(username: string, newPassword: string): void {
+  const norm = username.toLowerCase().trim();
+  if (!norm || !newPassword) return;
+  const all = readAllShares();
+  let changed = false;
+  const updated = all.map((s) => {
+    if (s.username.toLowerCase().trim() === norm) {
+      changed = true;
+      return {
+        ...s,
+        encryptedPassword: encryptText(newPassword)
+      };
+    }
+    return s;
+  });
+  if (changed) {
+    writeAllShares(updated);
+  }
+}

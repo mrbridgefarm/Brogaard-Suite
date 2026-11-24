@@ -101,13 +101,20 @@ function clearDismissedAliases(usernameLower: string) {
   }
 }
 
+const VALID_ALIAS_EMAIL_REGEX =
+  /^[^\s@/\\:<>()[\],;"]+@[^\s@/\\:<>()[\],;"]+\.[a-zA-Z0-9-]{2,}$/;
+
 export function getAliasesForUser(username: string): SenderAliasRecord[] {
   const key = username.toLowerCase().trim();
   const all = readAllAliases();
-  const list = Array.isArray(all[key]) ? all[key] : [];
+  const rawList = Array.isArray(all[key]) ? all[key] : [];
+
+  // Fjern eventuelle tidligere gemte ugyldige poster (f.eks. "/SOGo/dav/...")
+  let list = rawList.filter((a) => VALID_ALIAS_EMAIL_REGEX.test(String(a?.email || '').trim()));
+  let changed = list.length !== rawList.length;
 
   const hasPrimary = list.some((a) => a.email.toLowerCase().trim() === key);
-  if (!hasPrimary && key.includes('@')) {
+  if (!hasPrimary && VALID_ALIAS_EMAIL_REGEX.test(username.trim())) {
     const primaryAlias: SenderAliasRecord = {
       id: `primary::${key}`,
       email: username.trim(),
@@ -117,10 +124,18 @@ export function getAliasesForUser(username: string): SenderAliasRecord[] {
       source: 'primary',
       createdAt: new Date().toISOString()
     };
-    const updated = [primaryAlias, ...list];
-    all[key] = updated;
+    list = [primaryAlias, ...list];
+    changed = true;
+  }
+
+  if (list.length > 0 && !list.some((a) => a.isDefault)) {
+    list[0] = { ...list[0], isDefault: true };
+    changed = true;
+  }
+
+  if (changed) {
+    all[key] = list;
     writeAllAliases(all);
-    return updated;
   }
 
   return list;
@@ -139,7 +154,7 @@ export function upsertAliasForUser(
   const key = username.toLowerCase().trim();
   const emailClean = input.email.trim();
   const emailLower = emailClean.toLowerCase();
-  if (!emailClean || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean)) {
+  if (!emailClean || !VALID_ALIAS_EMAIL_REGEX.test(emailClean)) {
     throw new Error('Ugyldig e-mailadresse for alias.');
   }
 
@@ -253,7 +268,7 @@ export function mergeDiscoveredAliasesForUser(
   for (const rawEmail of discovered.emails || []) {
     const emailClean = rawEmail.trim();
     const emailLower = emailClean.toLowerCase();
-    if (!emailClean || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean)) {
+    if (!emailClean || !VALID_ALIAS_EMAIL_REGEX.test(emailClean)) {
       continue;
     }
 

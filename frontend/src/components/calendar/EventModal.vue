@@ -267,7 +267,11 @@ const safeVideoUrl = computed(() => {
                   :value="cal.id"
                   :disabled="cal.readOnly && cal.id !== calendarId"
                 >
-                  {{ cal.name }} {{ cal.readOnly ? '(Read-Only)' : '' }}
+                  {{
+                    cal.isShared && cal.owner
+                      ? `${cal.name} (Delt af ${cal.owner})`
+                      : cal.name
+                  }}{{ cal.readOnly ? ' (Kun læsning)' : cal.isShared ? ' (Skrivbar)' : '' }}
                 </option>
                 <option
                   v-if="calendarId && !store.calendars.some((c) => c.id === calendarId)"

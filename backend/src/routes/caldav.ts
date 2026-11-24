@@ -3,12 +3,15 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import {
   type CalDavCredentials,
+  type CalendarInfoDTO,
   fetchCalendars,
+  fetchSingleCalendarByUrl,
   fetchAllEvents,
   saveCalDavEvent,
   deleteCalDavEvent,
   updateEventRsvp,
   normalizeMailcowUrl,
+  ensureTrailingSlash,
   createCalDavCalendar,
   deleteCalDavCalendar
 } from '../services/davClient.js';
@@ -26,6 +29,17 @@ import {
   resolveShareToken
 } from '../services/shareStore.js';
 import {
+  type CalendarSharePermission,
+  listOutgoingUserShares,
+  upsertUserCalendarShare,
+  updateUserCalendarSharePermission,
+  deleteUserCalendarShare,
+  resolveIncomingSharesForRecipient,
+  findAuthorizedIncomingShareForUrl,
+  isUrlInsideSharedCalendar
+} from '../services/userShareStore.js';
+import { getAliasesForUser } from '../services/aliasStore.js';
+import {
   addUserSubscription,
   removeUserSubscription,
   syncUserSubscriptions
@@ -37,6 +51,60 @@ import {
 } from '../services/sessionAuth.js';
 
 export const caldavRouter = Router();
+
+class ForbiddenShareError extends Error {
+  statusCode = 403;
+  constructor(message: string) {
+    super(message);
+    this.name = 'ForbiddenShareError';
+  }
+}
+
+function getCallerIdentityEmails(username: string): string[] {
+  const list = [username.trim(), ...getAliasesForUser(username).map((a) => a.email.trim())];
+  return Array.from(new Set(list.map((e) => e.toLowerCase()).filter(Boolean)));
+}
+
+function resolveEffectiveDavCredentials(
+  callerCreds: CalDavCredentials,
+  targetUrl: string,
+  requiredAccess: 'read' | 'write'
+): { creds: CalDavCredentials; sharedCalendarUrl?: string } {
+  const identityEmails = getCallerIdentityEmails(callerCreds.username);
+  const incomingMatch = findAuthorizedIncomingShareForUrl(identityEmails, targetUrl);
+  if (!incomingMatch) {
+    return { creds: callerCreds };
+  }
+  if (requiredAccess === 'write' && incomingMatch.share.permission !== 'write') {
+    throw new ForbiddenShareError(
+      `Du har kun læserettigheder til denne kalender (delt af ${incomingMatch.share.ownerUsername}).`
+    );
+  }
+  return {
+    creds: incomingMatch.ownerCreds,
+    sharedCalendarUrl: incomingMatch.share.calendarUrl
+  };
+}
+
+function canonicalCalKey(rawUrl: string): string {
+  try {
+    const u = new URL(ensureTrailingSlash(rawUrl.trim()));
+    const decoded = u.pathname
+      .split('/')
+      .map((s) => {
+        try {
+          return decodeURIComponent(s);
+        } catch {
+          return s;
+        }
+      })
+      .join('/')
+      .toLowerCase();
+    return `${u.origin.toLowerCase()}${decoded}`;
+  } catch {
+    return ensureTrailingSlash(rawUrl.trim()).toLowerCase();
+  }
+}
 
 const publicShareLimiter = createRateLimiter(
   60,
@@ -70,16 +138,100 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
       ? req.body.subscriptions
       : undefined;
 
+    const identityEmails = getCallerIdentityEmails(creds.username);
     const [caldavCalendars, subData] = await Promise.all([
       fetchCalendars(creds),
       syncUserSubscriptions(creds, clientSubscriptions)
     ]);
+
+    const mergedCalendars: CalendarInfoDTO[] = [...caldavCalendars];
     const caldavEvents = await fetchAllEvents(creds, caldavCalendars, timeRange);
+    const mergedEvents: CalendarEventDTO[] = [...caldavEvents];
+
+    // Hent kalendere delt direkte med denne bruger i Brogaard Suite (Read / Write delegation)
+    const incomingShares = resolveIncomingSharesForRecipient(identityEmails);
+    if (incomingShares.length > 0) {
+      const shareSlug = (url: string): string => {
+        try {
+          const m = decodeURIComponent(url).match(/\/Calendar\/([^/]+)\/?$/i);
+          return m ? m[1].toLowerCase() : '';
+        } catch {
+          return '';
+        }
+      };
+
+      const fetchedShares = await Promise.allSettled(
+        incomingShares.map(async ({ share, ownerCreds }) => {
+          const calMeta = await fetchSingleCalendarByUrl(
+            ownerCreds,
+            share.calendarUrl,
+            share.calendarName,
+            share.calendarColor
+          );
+          const sharedCal: CalendarInfoDTO = {
+            ...calMeta,
+            id: share.calendarUrl,
+            url: share.calendarUrl,
+            name: share.calendarName || calMeta.name,
+            color: share.calendarColor || calMeta.color,
+            serverColor: share.calendarColor || calMeta.serverColor,
+            readOnly: share.permission !== 'write',
+            isShared: true,
+            sharePermission: share.permission,
+            owner: share.ownerUsername
+          };
+          const sharedEvents = await fetchAllEvents(ownerCreds, [sharedCal], timeRange);
+          return { share, sharedCal, sharedEvents };
+        })
+      );
+
+      for (const resItem of fetchedShares) {
+        if (resItem.status !== 'fulfilled') continue;
+        const { share, sharedCal, sharedEvents } = resItem.value;
+        const shareKey = canonicalCalKey(share.calendarUrl);
+        const targetSlug = shareSlug(share.calendarUrl);
+
+        const exactMatch = mergedCalendars.find((c) => canonicalCalKey(c.url) === shareKey);
+        if (exactMatch) {
+          if (share.permission === 'write') {
+            exactMatch.readOnly = false;
+            exactMatch.isShared = true;
+            exactMatch.owner = share.ownerUsername;
+            exactMatch.sharePermission = 'write';
+          } else if (!exactMatch.sharePermission) {
+            exactMatch.sharePermission = exactMatch.readOnly ? 'read' : 'write';
+          }
+          continue;
+        }
+
+        // Fjern evt. duplikeret SOGo-abonnement af samme ejers kalender, hvis Brogaard-delingen giver skrivbar (eller nyere) adgang
+        if (targetSlug) {
+          const subIdx = mergedCalendars.findIndex(
+            (c) =>
+              c.isShared &&
+              c.owner?.toLowerCase().trim() === share.ownerUsername.toLowerCase().trim() &&
+              decodeURIComponent(c.url || '').toLowerCase().endsWith(`_${targetSlug}/`)
+          );
+          if (subIdx !== -1) {
+            const removedId = mergedCalendars[subIdx].id;
+            mergedCalendars.splice(subIdx, 1);
+            for (let i = mergedEvents.length - 1; i >= 0; i--) {
+              if (mergedEvents[i].calendarId === removedId) {
+                mergedEvents.splice(i, 1);
+              }
+            }
+          }
+        }
+
+        mergedCalendars.push(sharedCal);
+        mergedEvents.push(...sharedEvents);
+      }
+    }
 
     sendCompressedJson(req, res, {
       ok: true,
-      calendars: [...caldavCalendars, ...subData.calendars],
-      events: [...caldavEvents, ...subData.events],
+      calendars: [...mergedCalendars, ...subData.calendars],
+      events: [...mergedEvents, ...subData.events],
       syncedAt: new Date().toISOString()
     });
   } catch (err: any) {
@@ -96,18 +248,31 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
  */
 caldavRouter.post('/events', async (req: Request, res: Response) => {
   try {
-    const creds = requireDavCredentials(req);
+    const callerCreds = requireDavCredentials(req);
     const event = req.body?.event as CalendarEventDTO | undefined;
     if (!event || !event.calendarId || !event.title) {
       res.status(400).json({ ok: false, error: 'Ugyldige begivenhedsdata.' });
       return;
     }
+    if (event.uid && /[\\/]/.test(event.uid)) {
+      throw new ForbiddenShareError('Ugyldigt begivenheds-UID.');
+    }
 
-    const saved = await saveCalDavEvent(creds, event);
+    const { creds: effectiveCreds, sharedCalendarUrl } = resolveEffectiveDavCredentials(
+      callerCreds,
+      event.calendarId,
+      'write'
+    );
+    if (sharedCalendarUrl && event.caldavUrl && !isUrlInsideSharedCalendar(event.caldavUrl, sharedCalendarUrl)) {
+      throw new ForbiddenShareError('Ugyldig mål-URL uden for den delte kalender.');
+    }
+
+    const saved = await saveCalDavEvent(effectiveCreds, event);
     res.json({ ok: true, event: saved });
   } catch (err: any) {
+    const status = err instanceof ForbiddenShareError || err?.statusCode === 403 ? 403 : 500;
     console.error('Fejl ved gem af CalDAV event:', err?.message || err);
-    res.status(500).json({
+    res.status(status).json({
       ok: false,
       error: err?.message || 'Kunne ikke gemme begivenheden på CalDAV-serveren.'
     });
@@ -119,7 +284,7 @@ caldavRouter.post('/events', async (req: Request, res: Response) => {
  */
 caldavRouter.delete('/events', async (req: Request, res: Response) => {
   try {
-    const creds = requireDavCredentials(req);
+    const callerCreds = requireDavCredentials(req);
     const caldavUrl = (req.body?.caldavUrl || req.query?.caldavUrl) as string | undefined;
     const etag = (req.body?.etag || req.query?.etag) as string | undefined;
 
@@ -128,11 +293,13 @@ caldavRouter.delete('/events', async (req: Request, res: Response) => {
       return;
     }
 
-    await deleteCalDavEvent(creds, caldavUrl, etag);
+    const { creds: effectiveCreds } = resolveEffectiveDavCredentials(callerCreds, caldavUrl, 'write');
+    await deleteCalDavEvent(effectiveCreds, caldavUrl, etag);
     res.json({ ok: true });
   } catch (err: any) {
+    const status = err instanceof ForbiddenShareError || err?.statusCode === 403 ? 403 : 500;
     console.error('Fejl ved sletning af CalDAV event:', err?.message || err);
-    res.status(500).json({
+    res.status(status).json({
       ok: false,
       error: err?.message || 'Kunne ikke slette begivenheden på CalDAV-serveren.'
     });
@@ -144,7 +311,7 @@ caldavRouter.delete('/events', async (req: Request, res: Response) => {
  */
 caldavRouter.post('/events/bulk-delete', async (req: Request, res: Response) => {
   try {
-    const creds = requireDavCredentials(req);
+    const callerCreds = requireDavCredentials(req);
     const items = Array.isArray(req.body?.items)
       ? (req.body.items as Array<{ caldavUrl?: string; etag?: string }>)
       : [];
@@ -159,7 +326,15 @@ caldavRouter.post('/events/bulk-delete', async (req: Request, res: Response) => 
     for (let i = 0; i < validItems.length; i += CONCURRENCY) {
       const batch = validItems.slice(i, i + CONCURRENCY);
       const results = await Promise.allSettled(
-        batch.map((item) => deleteCalDavEvent(creds, item.caldavUrl!.trim(), item.etag))
+        batch.map(async (item) => {
+          const itemUrl = item.caldavUrl!.trim();
+          const { creds: effectiveCreds } = resolveEffectiveDavCredentials(
+            callerCreds,
+            itemUrl,
+            'write'
+          );
+          return deleteCalDavEvent(effectiveCreds, itemUrl, item.etag);
+        })
       );
       for (const r of results) {
         if (r.status === 'fulfilled') {
@@ -301,7 +476,7 @@ caldavRouter.delete('/subscriptions', async (req: Request, res: Response) => {
  */
 caldavRouter.post('/rsvp', async (req: Request, res: Response) => {
   try {
-    const creds = requireDavCredentials(req);
+    const callerCreds = requireDavCredentials(req);
     const event = req.body?.event as CalendarEventDTO | undefined;
     const partstat = req.body?.partstat as AttendeeDTO['partstat'] | undefined;
 
@@ -310,11 +485,21 @@ caldavRouter.post('/rsvp', async (req: Request, res: Response) => {
       return;
     }
 
-    const updated = await updateEventRsvp(creds, event, partstat);
+    const { creds: effectiveCreds, sharedCalendarUrl } = resolveEffectiveDavCredentials(
+      callerCreds,
+      event.calendarId || event.caldavUrl || '',
+      'write'
+    );
+    if (sharedCalendarUrl && event.caldavUrl && !isUrlInsideSharedCalendar(event.caldavUrl, sharedCalendarUrl)) {
+      throw new ForbiddenShareError('Ugyldig mål-URL uden for den delte kalender.');
+    }
+
+    const updated = await updateEventRsvp(effectiveCreds, event, partstat);
     res.json({ ok: true, event: updated });
   } catch (err: any) {
+    const status = err instanceof ForbiddenShareError || err?.statusCode === 403 ? 403 : 500;
     console.error('Fejl ved RSVP opdatering:', err?.message || err);
-    res.status(500).json({
+    res.status(status).json({
       ok: false,
       error: err?.message || 'Kunne ikke opdatere mødesvar på CalDAV-serveren.'
     });
@@ -326,7 +511,7 @@ caldavRouter.post('/rsvp', async (req: Request, res: Response) => {
  */
 caldavRouter.post('/import', async (req: Request, res: Response) => {
   try {
-    const creds = requireDavCredentials(req);
+    const callerCreds = requireDavCredentials(req);
     const calendarId = String(req.body?.calendarId || '').trim();
     const rawIcs = normalizeDanishText(String(req.body?.icsContent || ''));
 
@@ -337,6 +522,8 @@ caldavRouter.post('/import', async (req: Request, res: Response) => {
       });
       return;
     }
+
+    const { creds: effectiveCreds } = resolveEffectiveDavCredentials(callerCreds, calendarId, 'write');
 
     const parsedEvents = parseIcsToEvents(rawIcs, calendarId);
     if (parsedEvents.length === 0) {
@@ -349,7 +536,7 @@ caldavRouter.post('/import', async (req: Request, res: Response) => {
 
     const savedEvents: CalendarEventDTO[] = [];
     for (const ev of parsedEvents) {
-      const saved = await saveCalDavEvent(creds, {
+      const saved = await saveCalDavEvent(effectiveCreds, {
         ...ev,
         calendarId,
         uid: crypto.randomUUID(),
@@ -366,8 +553,9 @@ caldavRouter.post('/import', async (req: Request, res: Response) => {
       events: savedEvents
     });
   } catch (err: any) {
+    const status = err instanceof ForbiddenShareError || err?.statusCode === 403 ? 403 : 500;
     console.error('Fejl ved ICS import:', err?.message || err);
-    res.status(500).json({
+    res.status(status).json({
       ok: false,
       error: err?.message || 'Kunne ikke importere .ics-filen til kalenderen.'
     });
@@ -544,6 +732,106 @@ caldavRouter.get('/public/:token', publicShareLimiter, async (req: Request, res:
     res.status(500).json({
       ok: false,
       error: 'Kunne ikke hente den delte kalender fra serveren.'
+    });
+  }
+});
+
+/**
+ * GET /api/caldav/user-shares
+ * Henter kalenderdelinger som den aktuelle bruger har oprettet til andre brugere (Læs / Skriv).
+ */
+caldavRouter.get('/user-shares', (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const userShares = listOutgoingUserShares(creds.username);
+    res.json({ ok: true, userShares });
+  } catch (err: any) {
+    res.status(401).json({ ok: false, error: err?.message || 'Kræver aktivt login.' });
+  }
+});
+
+/**
+ * POST /api/caldav/user-shares
+ * Deler en af brugerens egne kalendere med en anden bruger med enten 'read' eller 'write' rettighed.
+ */
+caldavRouter.post('/user-shares', (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const calendarUrl = String(req.body?.calendarUrl || '').trim();
+    const calendarName = String(req.body?.calendarName || 'Delt kalender').trim();
+    const calendarColor = String(req.body?.calendarColor || '#2563eb').trim();
+    const recipientEmail = String(req.body?.recipientEmail || '').trim();
+    const permission: CalendarSharePermission =
+      req.body?.permission === 'write' ? 'write' : 'read';
+
+    if (!calendarUrl || !recipientEmail) {
+      res.status(400).json({
+        ok: false,
+        error: 'Både kalender og modtager e-mailadresse skal angives.'
+      });
+      return;
+    }
+
+    const userShare = upsertUserCalendarShare({
+      ownerCreds: creds,
+      calendarUrl,
+      calendarName,
+      calendarColor,
+      recipientEmail,
+      permission
+    });
+
+    res.json({ ok: true, userShare });
+  } catch (err: any) {
+    res.status(400).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke dele kalenderen med brugeren.'
+    });
+  }
+});
+
+/**
+ * PATCH /api/caldav/user-shares/:id
+ * Opdaterer rettigheden ('read' <-> 'write') på en eksisterende bruger-deling.
+ */
+caldavRouter.patch('/user-shares/:id', (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const rawId = req.params.id;
+    const shareId = String(Array.isArray(rawId) ? rawId[0] : rawId || '').trim();
+    const permission: CalendarSharePermission =
+      req.body?.permission === 'write' ? 'write' : 'read';
+
+    const updated = updateUserCalendarSharePermission(creds.username, shareId, permission);
+    if (!updated) {
+      res.status(404).json({ ok: false, error: 'Kalenderdeling blev ikke fundet.' });
+      return;
+    }
+
+    res.json({ ok: true, userShare: updated });
+  } catch (err: any) {
+    res.status(400).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke opdatere rettigheden.'
+    });
+  }
+});
+
+/**
+ * DELETE /api/caldav/user-shares/:id
+ * Tilbagekalder en bruger-deling.
+ */
+caldavRouter.delete('/user-shares/:id', (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const rawId = req.params.id;
+    const shareId = String(Array.isArray(rawId) ? rawId[0] : rawId || '').trim();
+    const deleted = deleteUserCalendarShare(creds.username, shareId);
+    res.json({ ok: true, deleted });
+  } catch (err: any) {
+    res.status(400).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke tilbagekalde kalenderdeling.'
     });
   }
 });

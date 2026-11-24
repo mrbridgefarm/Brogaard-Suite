@@ -355,7 +355,7 @@ function removeSingleClipboardEvent(evId: string) {
                   {{ cal.owner || 'Kalender-abonnement' }}
                 </div>
                 <div v-else-if="cal.isShared || cal.owner" class="text-[10px] text-slate-400 truncate">
-                  Delt af {{ cal.owner || 'ejer' }}
+                  Delt af {{ cal.owner || 'ejer' }} • {{ cal.readOnly ? 'Kun læsning' : 'Skrivbar' }}
                 </div>
               </div>
             </label>
@@ -363,10 +363,10 @@ function removeSingleClipboardEvent(evId: string) {
             <div class="flex items-center gap-0.5 shrink-0">
               <template v-if="!store.isPublicShareMode">
                 <button
-                  v-if="!cal.isSubscribed && !cal.id.startsWith('sub::')"
+                  v-if="!cal.isShared && !cal.isSubscribed && !cal.id.startsWith('sub::')"
                   type="button"
                   class="p-1 rounded hover:bg-blue-500/20 text-slate-400 hover:text-blue-300 transition"
-                  title="Del denne kalender via offentligt Read-Only link"
+                  title="Del kalender med brugere (læs/skriv) eller offentligt link"
                   @click="store.openShareModal(cal.id)"
                 >
                   <Share2 class="w-3 h-3" />
@@ -480,7 +480,7 @@ function removeSingleClipboardEvent(evId: string) {
             :key="wCal.id"
             :value="wCal.id"
           >
-            {{ wCal.name }}
+            {{ wCal.isShared && wCal.owner ? `${wCal.name} (Delt af ${wCal.owner})` : wCal.name }}
           </option>
         </select>
       </div>

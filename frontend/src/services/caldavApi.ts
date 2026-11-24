@@ -2,7 +2,9 @@ import type {
   CalendarSource,
   CalendarEvent,
   RsvpStatus,
-  PublicShareLink
+  PublicShareLink,
+  UserCalendarShare,
+  CalendarSharePermission
 } from '../types/calendar';
 
 export interface SyncResponse {
@@ -181,6 +183,66 @@ export async function apiDeleteShare(token: string): Promise<void> {
   const data = await res.json();
   if (!res.ok || !data.ok) {
     throw new Error(data.error || 'Kunne ikke slette delingslink.');
+  }
+}
+
+export async function apiListUserShares(): Promise<UserCalendarShare[]> {
+  const res = await fetch('/api/caldav/user-shares', {
+    method: 'GET',
+    credentials: 'include'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke hente bruger-delinger.');
+  }
+  return data.userShares || [];
+}
+
+export async function apiUpsertUserShare(params: {
+  calendarUrl: string;
+  calendarName: string;
+  calendarColor: string;
+  recipientEmail: string;
+  permission: CalendarSharePermission;
+}): Promise<UserCalendarShare> {
+  const res = await fetch('/api/caldav/user-shares', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(params)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke dele kalenderen med brugeren.');
+  }
+  return data.userShare;
+}
+
+export async function apiUpdateUserSharePermission(
+  shareId: string,
+  permission: CalendarSharePermission
+): Promise<UserCalendarShare> {
+  const res = await fetch(`/api/caldav/user-shares/${encodeURIComponent(shareId)}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ permission })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke opdatere rettighed.');
+  }
+  return data.userShare;
+}
+
+export async function apiDeleteUserShare(shareId: string): Promise<void> {
+  const res = await fetch(`/api/caldav/user-shares/${encodeURIComponent(shareId)}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke tilbagekalde bruger-deling.');
   }
 }
 

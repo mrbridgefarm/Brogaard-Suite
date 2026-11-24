@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, computed, watch } from 'vue';
 import {
   Share2,
   Copy,
@@ -8,25 +8,78 @@ import {
   X,
   Lock,
   ExternalLink,
-  Link2
+  Link2,
+  Users,
+  UserPlus,
+  Pencil,
+  Eye
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../../stores/calendarStore';
+import { useContactsStore } from '../../stores/contactsStore';
+import type { CalendarSharePermission } from '../../types/calendar';
 
 const store = useCalendarStore();
+const contactsStore = useContactsStore();
 
+const activeTab = ref<'USERS' | 'PUBLIC_LINK'>('USERS');
+
+// Tab 1: Del med bruger (Læs / Skriv)
+const shareCalendarId = ref('');
+const recipientEmail = ref('');
+const permission = ref<CalendarSharePermission>('read');
+const isSharingUser = ref(false);
+const showUserSuggestions = ref(false);
+
+// Tab 2: Offentligt link (3. part, Read-Only)
 const label = ref('');
 const selectedCalendarIds = ref<string[]>([]);
 const hideDetails = ref(false);
 const isCreating = ref(false);
 const copiedToken = ref<string | null>(null);
 
+const ownCalendars = computed(() =>
+  store.calendars.filter(
+    (c) => !c.isShared && !c.isSubscribed && !c.id.startsWith('sub::')
+  )
+);
+
+const userSuggestions = computed(() => {
+  if (!showUserSuggestions.value) return [];
+  const q = recipientEmail.value.trim();
+  if (!q) return [];
+  return contactsStore.searchContactsForAutocomplete(q, 6);
+});
+
+function selectRecipientSuggestion(item: { name: string; email: string }) {
+  recipientEmail.value = item.email.trim();
+  showUserSuggestions.value = false;
+}
+
+function handleRecipientBlur() {
+  window.setTimeout(() => {
+    showUserSuggestions.value = false;
+  }, 160);
+}
+
 watch(
   () => store.isShareModalOpen,
   (isOpen) => {
     if (!isOpen) return;
-    if (store.preselectedShareCalendarId) {
-      selectedCalendarIds.value = [store.preselectedShareCalendarId];
-      const cal = store.getCalendarById(store.preselectedShareCalendarId);
+    activeTab.value = 'USERS';
+
+    const pre = store.preselectedShareCalendarId;
+    if (pre && ownCalendars.value.some((c) => c.id === pre)) {
+      shareCalendarId.value = pre;
+    } else {
+      shareCalendarId.value = ownCalendars.value[0]?.id || '';
+    }
+    recipientEmail.value = '';
+    permission.value = 'read';
+    showUserSuggestions.value = false;
+
+    if (pre) {
+      selectedCalendarIds.value = [pre];
+      const cal = store.getCalendarById(pre);
       label.value = cal ? cal.name : 'Delt kalender';
     } else {
       selectedCalendarIds.value = store.calendars.map((c) => c.id);
@@ -35,6 +88,23 @@ watch(
     hideDetails.value = false;
   }
 );
+
+async function handleShareWithUser() {
+  if (!shareCalendarId.value || !recipientEmail.value.trim()) return;
+  isSharingUser.value = true;
+  try {
+    const saved = await store.shareCalendarWithUser({
+      calendarId: shareCalendarId.value,
+      recipientEmail: recipientEmail.value.trim(),
+      permission: permission.value
+    });
+    if (saved) {
+      recipientEmail.value = '';
+    }
+  } finally {
+    isSharingUser.value = false;
+  }
+}
 
 function buildShareUrl(token: string): string {
   const origin = window.location.origin;
@@ -98,7 +168,7 @@ async function handleCreateShare() {
           <div class="flex items-center gap-2">
             <Share2 class="w-4 h-4 text-blue-400" />
             <h3 class="text-base font-bold text-slate-100">
-              Del kalender med 3. part (Offentligt Read-Only link)
+              Del Kalender
             </h3>
           </div>
           <button
@@ -110,7 +180,213 @@ async function handleCreateShare() {
           </button>
         </div>
 
-        <div class="p-5 overflow-y-auto space-y-5 text-xs">
+        <!-- Tabs: Del med bruger (Læs/Skriv) vs Offentligt link -->
+        <div class="px-5 pt-3 pb-1 border-b border-slate-800 bg-slate-950/60">
+          <div class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-900 border border-slate-800 text-xs">
+            <button
+              type="button"
+              class="py-1.5 px-3 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition"
+              :class="activeTab === 'USERS' ? 'dav-theme-btn shadow-sm' : 'text-slate-400 hover:text-slate-200'"
+              @click="activeTab = 'USERS'"
+            >
+              <Users class="w-3.5 h-3.5" />
+              <span>Del med bruger (Læs / Skriv)</span>
+            </button>
+            <button
+              type="button"
+              class="py-1.5 px-3 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition"
+              :class="activeTab === 'PUBLIC_LINK' ? 'dav-theme-btn shadow-sm' : 'text-slate-400 hover:text-slate-200'"
+              @click="activeTab = 'PUBLIC_LINK'"
+            >
+              <Link2 class="w-3.5 h-3.5" />
+              <span>Offentligt link (3. part)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 1: Del med bruger i systemet (Læs / Skriv) -->
+        <div v-if="activeTab === 'USERS'" class="p-5 overflow-y-auto space-y-5 text-xs">
+          <form class="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3.5" @submit.prevent="handleShareWithUser">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-semibold text-slate-200">Giv adgang til en anden bruger</span>
+              <span class="text-[10.5px] text-slate-400">Læs eller Læs &amp; Skriv</span>
+            </div>
+
+            <div v-if="ownCalendars.length === 0" class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px]">
+              Du har ingen egne kalendere at dele lige nu (kun dine egne kalendere kan deles videre).
+            </div>
+
+            <template v-else>
+              <div>
+                <label class="block text-slate-400 font-medium mb-1">Vælg din kalender</label>
+                <select
+                  v-model="shareCalendarId"
+                  class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+                >
+                  <option v-for="cal in ownCalendars" :key="cal.id" :value="cal.id">
+                    {{ cal.name }}
+                  </option>
+                </select>
+              </div>
+
+              <div class="relative">
+                <label class="block text-slate-400 font-medium mb-1">Brugerens e-mailadresse</label>
+                <input
+                  v-model="recipientEmail"
+                  type="email"
+                  required
+                  autocomplete="off"
+                  placeholder="f.eks. anne@ditdomæne.dk"
+                  class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+                  @focus="showUserSuggestions = true"
+                  @blur="handleRecipientBlur"
+                />
+
+                <div
+                  v-if="userSuggestions.length > 0"
+                  class="absolute left-0 right-0 mt-1 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl max-h-44 overflow-y-auto z-40 divide-y divide-slate-800"
+                >
+                  <button
+                    v-for="item in userSuggestions"
+                    :key="item.email"
+                    type="button"
+                    class="w-full px-3 py-2 text-left hover:bg-slate-800 flex items-center justify-between gap-2 transition"
+                    @mousedown.prevent="selectRecipientSuggestion(item)"
+                  >
+                    <span class="font-medium text-slate-100 truncate">{{ item.name }}</span>
+                    <span class="text-[11px] text-slate-400 truncate">{{ item.email }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-slate-400 font-medium mb-1.5">Rettighedsniveau</label>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    class="p-2.5 rounded-xl border text-left transition space-y-0.5"
+                    :class="
+                      permission === 'read'
+                        ? 'bg-amber-500/15 border-amber-500/50 text-amber-100'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                    "
+                    @click="permission = 'read'"
+                  >
+                    <div class="flex items-center gap-1.5 font-semibold">
+                      <Eye class="w-3.5 h-3.5 text-amber-400" />
+                      <span>Kun læsning</span>
+                    </div>
+                    <p class="text-[10.5px] text-slate-400 leading-snug">
+                      Modtageren kan se aftaler i kalenderen.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    class="p-2.5 rounded-xl border text-left transition space-y-0.5"
+                    :class="
+                      permission === 'write'
+                        ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-100'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                    "
+                    @click="permission = 'write'"
+                  >
+                    <div class="flex items-center gap-1.5 font-semibold">
+                      <Pencil class="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Læs &amp; Skriv</span>
+                    </div>
+                    <p class="text-[10.5px] text-slate-400 leading-snug">
+                      Modtageren kan oprette, redigere, flytte og slette aftaler.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                :disabled="isSharingUser || !shareCalendarId || !recipientEmail.trim()"
+                class="w-full py-2 rounded-xl dav-theme-btn disabled:opacity-50 font-semibold flex items-center justify-center gap-1.5 shadow transition"
+              >
+                <UserPlus class="w-4 h-4" />
+                {{ isSharingUser ? 'Gemmer adgang...' : 'Del kalender med bruger' }}
+              </button>
+            </template>
+
+            <p class="text-[11px] text-slate-400 leading-relaxed pt-1 border-t border-slate-800/80">
+              Modtageren får automatisk kalenderen vist i sin kalenderoversigt næste gang vedkommende synkroniserer eller logger ind i Brogaard Suite — og ændringer gemmes direkte på Mailcow/SOGo.
+            </p>
+          </form>
+
+          <!-- Aktive bruger-delinger -->
+          <div class="space-y-2">
+            <h4 class="font-bold uppercase tracking-wider text-slate-400 text-[11px]">
+              Brugere med adgang ({{ store.userShares.length }})
+            </h4>
+
+            <div
+              v-if="store.userShares.length === 0"
+              class="p-5 text-center rounded-xl bg-slate-950/60 border border-slate-800 text-slate-400"
+            >
+              Du har ikke delt nogen kalendere med andre brugere endnu.
+            </div>
+
+            <div
+              v-for="uShare in store.userShares"
+              :key="uShare.id"
+              class="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-3"
+            >
+              <div class="min-w-0 flex-1 space-y-0.5">
+                <div class="flex items-center gap-2">
+                  <span
+                    class="w-2.5 h-2.5 rounded-full shrink-0"
+                    :style="{ backgroundColor: uShare.calendarColor }"
+                  ></span>
+                  <span class="font-semibold text-slate-100 truncate">
+                    {{ uShare.recipientEmail }}
+                  </span>
+                </div>
+                <div class="text-[11px] text-slate-400 truncate pl-4">
+                  Kalender: {{ uShare.calendarName }}
+                </div>
+              </div>
+
+              <div class="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  class="px-2.5 py-1 rounded-lg border text-[11px] font-semibold inline-flex items-center gap-1 transition"
+                  :class="
+                    uShare.permission === 'write'
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                      : 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25'
+                  "
+                  title="Klik for at skifte mellem Kun læsning og Læs & Skriv"
+                  @click="
+                    store.updateUserSharePermission(
+                      uShare.id,
+                      uShare.permission === 'write' ? 'read' : 'write'
+                    )
+                  "
+                >
+                  <Pencil v-if="uShare.permission === 'write'" class="w-3 h-3" />
+                  <Eye v-else class="w-3 h-3" />
+                  <span>{{ uShare.permission === 'write' ? 'Læs & Skriv' : 'Kun læsning' }}</span>
+                </button>
+
+                <button
+                  type="button"
+                  class="p-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition"
+                  title="Tilbagekald adgang"
+                  @click="store.revokeUserShare(uShare.id)"
+                >
+                  <Trash2 class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: Offentligt link (3. part, Read-Only) -->
+        <div v-else class="p-5 overflow-y-auto space-y-5 text-xs">
           <!-- Opret nyt delingslink -->
           <form class="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3.5" @submit.prevent="handleCreateShare">
             <div class="flex items-center justify-between">

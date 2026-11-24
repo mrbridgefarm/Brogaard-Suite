@@ -3,6 +3,11 @@ import { fetchMailFolders } from '../services/mailClient.js';
 import { fetchCalendars, normalizeMailcowUrl, type CalendarInfoDTO } from '../services/davClient.js';
 import { getAliasesForUser } from '../services/aliasStore.js';
 import { resolveAliasesWithMailcow } from '../services/mailcowAliases.js';
+import { refreshPublicShareOwnerPassword } from '../services/shareStore.js';
+import {
+  refreshUserShareOwnerPassword,
+  resolveIncomingSharesForRecipient
+} from '../services/userShareStore.js';
 import {
   createRateLimiter,
   getSessionFromCookie,
@@ -118,6 +123,14 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
       caldavUrl: serverCfg.caldavUrl
     });
 
+    // Opdatér evt. krypterede kodeord på ejerens aktive delingslinks / bruger-delinger
+    try {
+      refreshPublicShareOwnerPassword(username, password);
+      refreshUserShareOwnerPassword(username, password);
+    } catch {
+      // Ignorér ved skrivebeskyttet data-dir
+    }
+
     const davCreds = {
       serverUrl: serverCfg.caldavUrl,
       username,
@@ -145,6 +158,44 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
           console.warn('CalDAV forhåndstjek ved login fejlede:', davErr?.message || davErr);
         })
     ]);
+
+    try {
+      const incoming = resolveIncomingSharesForRecipient([
+        username,
+        ...aliases.map((a) => a.email)
+      ]);
+      const existingNorms = new Set(
+        calendars.map((c) => decodeURIComponent(c.url || '').toLowerCase().replace(/\/+$/, ''))
+      );
+      for (const { share } of incoming) {
+        const norm = decodeURIComponent(share.calendarUrl).toLowerCase().replace(/\/+$/, '');
+        if (existingNorms.has(norm)) {
+          const match = calendars.find(
+            (c) => decodeURIComponent(c.url || '').toLowerCase().replace(/\/+$/, '') === norm
+          );
+          if (match && share.permission === 'write') {
+            match.readOnly = false;
+            match.isShared = true;
+            match.owner = share.ownerUsername;
+            match.sharePermission = 'write';
+          }
+        } else {
+          calendars.push({
+            id: share.calendarUrl,
+            url: share.calendarUrl,
+            name: share.calendarName,
+            color: share.calendarColor,
+            serverColor: share.calendarColor,
+            readOnly: share.permission !== 'write',
+            isShared: true,
+            sharePermission: share.permission,
+            owner: share.ownerUsername
+          });
+        }
+      }
+    } catch {
+      // Ignorér hvis incoming share opslag fejler ved login
+    }
 
     res.json({
       ok: true,

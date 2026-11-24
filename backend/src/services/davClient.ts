@@ -21,6 +21,7 @@ export interface CalendarInfoDTO {
   serverColor: string;
   readOnly: boolean;
   isShared: boolean;
+  sharePermission?: 'read' | 'write';
   isSubscribed?: boolean;
   subscriptionUrl?: string;
   owner?: string;

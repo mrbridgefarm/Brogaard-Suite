@@ -9,7 +9,7 @@
 **Brogaard Suite** erstatter behovet for den tunge klassiske SOGo-brugerflade ved at samle alle tre søjler fra Mailcow i én hurtig, sammenhængende og brugervenlig Vue 3 web-applikation — uden en tung server-database:
 
 * **✉️ Mail (`IMAP` / `SMTP` / `ManageSieve`):** Direkte opkobling mod Dovecot/Postfix og port `4190`. Inkluderer automatisk opdagelse af dine Mailcow-aliaser (både via SOGo DAV og valgfri Read-Only `MAILCOW_API_KEY`), `Ctrl+C`/`Ctrl+X`/`Ctrl+V` mellem mapper, global søgning i alle mapper, Rich-Text/HTML editor med Smart Dark-Mode kontrast og Rspamd spam/ham-træning.
-* **📅 Kalender (`CalDAV`):** 5 fleksible visninger (**År**, **Måned**, **Uge**, **Dag**, **Liste**), danske ugenumre, automatisk opdagelse af egne og delte SOGo-kalendere inkl. læse-/skriverettigheder, Excel-lignende `Ctrl+C`/`Ctrl+X`/`Ctrl+V` på tværs af dage, 1-kliks Danske Helligdage, `.ics`/`webcal://`-abonnementer, mødesikkerhed og offentlige Read-Only delingslinks (`?share=<token>`).
+* **📅 Kalender (`CalDAV`):** 5 fleksible visninger (**År**, **Måned**, **Uge**, **Dag**, **Liste**), danske ugenumre, automatisk opdagelse af egne og delte SOGo-kalendere inkl. læse-/skriverettigheder, direkte brugerdeling med valg mellem **Kun læsning** eller **Læs & Skriv**, Excel-lignende `Ctrl+C`/`Ctrl+X`/`Ctrl+V` på tværs af dage, 1-kliks Danske Helligdage, `.ics`/`webcal://`-abonnementer, mødesikkerhed og offentlige Read-Only delingslinks (`?share=<token>`).
 * **👥 Kontakter (`CardDAV`):** Fuld tovejs-synkronisering af dine Mailcow/SOGo-adressebøger (`personal` m.fl. inkl. mobil-kontakter), grupper/tags, instant søgning, fødselsdage og import/eksport af `.vcf` (vCard 3.0).
 
 ---
