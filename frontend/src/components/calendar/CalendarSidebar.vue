@@ -15,14 +15,17 @@ import {
   ArrowUpDown,
   Rss,
   Cake,
-  Users
+  Users,
+  Pencil,
+  Check,
+  UserMinus
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../../stores/calendarStore';
 import { useContactsStore } from '../../stores/contactsStore';
 import { useTheme } from '../../composables/useTheme';
 import { requestNotificationPermission } from '../../services/notifications';
-import type { CalendarEvent } from '../../types/calendar';
-import { ref } from 'vue';
+import type { CalendarEvent, CalendarSource } from '../../types/calendar';
+import { ref, nextTick } from 'vue';
 
 const props = defineProps<{
   width: number;
@@ -43,6 +46,73 @@ const newCalendarName = ref('');
 const newCalendarUrl = ref('');
 const newCalendarColor = ref('#7c3aed');
 const isCreatingCalendar = ref(false);
+
+const editingCalId = ref<string | null>(null);
+const renameDraft = ref('');
+const renameOnServer = ref(false);
+const isRenamingCalendar = ref(false);
+const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null);
+
+function startRenameCalendar(cal: CalendarSource) {
+  if (editingCalId.value === cal.id) {
+    cancelRenameCalendar();
+    return;
+  }
+  editingCalId.value = cal.id;
+  renameDraft.value = cal.name;
+  renameOnServer.value = !cal.isShared && !cal.isSubscribed && !cal.id.startsWith('sub::');
+  void nextTick(() => {
+    const el = Array.isArray(renameInputRef.value)
+      ? renameInputRef.value[0]
+      : renameInputRef.value;
+    el?.focus();
+    el?.select();
+  });
+}
+
+function cancelRenameCalendar() {
+  editingCalId.value = null;
+  renameDraft.value = '';
+}
+
+async function submitRenameCalendar(cal: CalendarSource) {
+  isRenamingCalendar.value = true;
+  try {
+    const trimmed = renameDraft.value.trim();
+    const ok = await store.setCalendarNameOverride(
+      cal.id,
+      trimmed || null,
+      renameOnServer.value
+    );
+    if (ok) {
+      cancelRenameCalendar();
+    }
+  } finally {
+    isRenamingCalendar.value = false;
+  }
+}
+
+async function resetCalendarName(cal: CalendarSource) {
+  isRenamingCalendar.value = true;
+  try {
+    const ok = await store.setCalendarNameOverride(cal.id, null, false);
+    if (ok) {
+      cancelRenameCalendar();
+    }
+  } finally {
+    isRenamingCalendar.value = false;
+  }
+}
+
+async function confirmLeaveSharedCalendar(cal: CalendarSource) {
+  const ownerSuffix = cal.owner ? ` (delt af ${cal.owner})` : '';
+  const ok = window.confirm(
+    `Vil du forlade den delte kalender "${cal.name}"${ownerSuffix}?\n\nDine adgangsrettigheder fjernes, og kalenderen forsvinder fra din oversigt.`
+  );
+  if (ok) {
+    await store.leaveSharedCalendar(cal.id);
+  }
+}
 
 async function submitNewCalendar() {
   isCreatingCalendar.value = true;
@@ -312,106 +382,196 @@ function removeSingleClipboardEvent(evId: string) {
           <div
             v-for="cal in store.calendars"
             :key="cal.id"
-            class="group p-2 rounded-xl border transition flex items-center justify-between gap-1.5"
+            class="group p-2 rounded-xl border transition space-y-1.5"
             :class="cal.visible
               ? 'bg-slate-800/60 border-slate-700/70'
               : 'bg-slate-900/40 border-slate-800/50 opacity-60'"
           >
-            <label class="flex items-center gap-2 min-w-0 cursor-pointer flex-1">
-              <input
-                type="checkbox"
-                :checked="cal.visible"
-                class="rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-0 cursor-pointer shrink-0"
-                @change="store.toggleCalendarVisibility(cal.id)"
-              />
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-1">
-                  <span class="text-xs font-medium text-slate-100 truncate" :title="cal.name">
-                    {{ cal.name }}
-                  </span>
-                  <span
-                    v-if="cal.isSubscribed || cal.id.startsWith('sub::')"
-                    class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[9px] font-semibold shrink-0"
-                    title="Abonneret kalender (opdateres automatisk, skrivebeskyttet)"
-                  >
-                    <Rss class="w-2.5 h-2.5" />
-                  </span>
-                  <span
-                    v-else-if="cal.readOnly"
-                    class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[9px] font-semibold shrink-0"
-                    title="Skrivebeskyttet kalender (Read-Only)"
-                  >
-                    <Lock class="w-2.5 h-2.5" />
-                  </span>
-                  <span
-                    v-else-if="cal.isShared"
-                    class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[9px] font-semibold shrink-0"
-                    title="Delt kalender (Skrivbar)"
-                  >
-                    <Users class="w-2.5 h-2.5" />
-                  </span>
+            <div class="flex items-center justify-between gap-1.5">
+              <label class="flex items-center gap-2 min-w-0 cursor-pointer flex-1">
+                <input
+                  type="checkbox"
+                  :checked="cal.visible"
+                  class="rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-0 cursor-pointer shrink-0"
+                  @change="store.toggleCalendarVisibility(cal.id)"
+                />
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-1">
+                    <span
+                      class="text-xs font-medium text-slate-100 truncate"
+                      :title="
+                        cal.localNameOverride && cal.serverName && cal.localNameOverride !== cal.serverName
+                          ? `${cal.name} (Original: ${cal.serverName})`
+                          : cal.name
+                      "
+                    >
+                      {{ cal.name }}
+                    </span>
+                    <span
+                      v-if="cal.isSubscribed || cal.id.startsWith('sub::')"
+                      class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[9px] font-semibold shrink-0"
+                      title="Abonneret kalender (opdateres automatisk, skrivebeskyttet)"
+                    >
+                      <Rss class="w-2.5 h-2.5" />
+                    </span>
+                    <span
+                      v-else-if="cal.readOnly"
+                      class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[9px] font-semibold shrink-0"
+                      title="Skrivebeskyttet kalender (Read-Only)"
+                    >
+                      <Lock class="w-2.5 h-2.5" />
+                    </span>
+                    <span
+                      v-else-if="cal.isShared"
+                      class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[9px] font-semibold shrink-0"
+                      title="Delt kalender (Skrivbar)"
+                    >
+                      <Users class="w-2.5 h-2.5" />
+                    </span>
+                  </div>
+                  <div v-if="cal.isSubscribed || cal.id.startsWith('sub::')" class="text-[10px] text-slate-400 truncate">
+                    {{ cal.owner || 'Kalender-abonnement' }}
+                  </div>
+                  <div v-else-if="cal.isShared || cal.owner" class="text-[10px] text-slate-400 truncate">
+                    Delt af {{ cal.owner || 'ejer' }} • {{ cal.readOnly ? 'Kun læsning' : 'Skrivbar' }}
+                  </div>
                 </div>
-                <div v-if="cal.isSubscribed || cal.id.startsWith('sub::')" class="text-[10px] text-slate-400 truncate">
-                  {{ cal.owner || 'Kalender-abonnement' }}
-                </div>
-                <div v-else-if="cal.isShared || cal.owner" class="text-[10px] text-slate-400 truncate">
-                  Delt af {{ cal.owner || 'ejer' }} • {{ cal.readOnly ? 'Kun læsning' : 'Skrivbar' }}
-                </div>
-              </div>
-            </label>
+              </label>
 
-            <div class="flex items-center gap-0.5 shrink-0">
-              <template v-if="!store.isPublicShareMode">
+              <div class="flex items-center gap-0.5 shrink-0">
+                <template v-if="!store.isPublicShareMode">
+                  <button
+                    type="button"
+                    class="p-1 rounded hover:bg-slate-700 transition"
+                    :class="editingCalId === cal.id ? 'bg-slate-700 text-blue-300' : 'text-slate-400 hover:text-slate-100'"
+                    title="Omdøb kalender / giv alias-navn"
+                    @click="startRenameCalendar(cal)"
+                  >
+                    <Pencil class="w-3 h-3" />
+                  </button>
+                  <button
+                    v-if="!cal.isShared && !cal.isSubscribed && !cal.id.startsWith('sub::')"
+                    type="button"
+                    class="p-1 rounded hover:bg-blue-500/20 text-slate-400 hover:text-blue-300 transition"
+                    title="Del kalender med brugere (læs/skriv) eller offentligt link"
+                    @click="store.openShareModal(cal.id)"
+                  >
+                    <Share2 class="w-3 h-3" />
+                  </button>
+                  <button
+                    v-if="cal.isShared && !cal.isSubscribed && !cal.id.startsWith('sub::')"
+                    type="button"
+                    class="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
+                    title="Forlad delt kalender og fjern mine rettigheder"
+                    @click="confirmLeaveSharedCalendar(cal)"
+                  >
+                    <UserMinus class="w-3 h-3" />
+                  </button>
+                  <button
+                    v-if="(!cal.readOnly && !cal.isShared) || cal.isSubscribed || cal.id.startsWith('sub::')"
+                    type="button"
+                    class="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
+                    :title="cal.isSubscribed || cal.id.startsWith('sub::') ? 'Afmeld kalender-abonnement' : 'Slet kalender (inkl. alle begivenheder)'"
+                    @click="confirmDeleteCalendar(cal.id, cal.name, Boolean(cal.isSubscribed || cal.id.startsWith('sub::')))"
+                  >
+                    <Trash2 class="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                    title="Skjul midlertidigt fra listen"
+                    @click="store.hideCalendar(cal.id)"
+                  >
+                    <EyeOff class="w-3 h-3" />
+                  </button>
+                </template>
+
                 <button
-                  v-if="!cal.isShared && !cal.isSubscribed && !cal.id.startsWith('sub::')"
-                  type="button"
-                  class="p-1 rounded hover:bg-blue-500/20 text-slate-400 hover:text-blue-300 transition"
-                  title="Del kalender med brugere (læs/skriv) eller offentligt link"
-                  @click="store.openShareModal(cal.id)"
-                >
-                  <Share2 class="w-3 h-3" />
-                </button>
-                <button
-                  v-if="(!cal.readOnly && !cal.isShared) || cal.isSubscribed || cal.id.startsWith('sub::')"
-                  type="button"
-                  class="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
-                  :title="cal.isSubscribed || cal.id.startsWith('sub::') ? 'Afmeld kalender-abonnement' : 'Slet kalender (inkl. alle begivenheder)'"
-                  @click="confirmDeleteCalendar(cal.id, cal.name, Boolean(cal.isSubscribed || cal.id.startsWith('sub::')))"
-                >
-                  <Trash2 class="w-3 h-3" />
-                </button>
-                <button
+                  v-if="cal.localColorOverride && cal.localColorOverride !== cal.serverColor"
                   type="button"
                   class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
-                  title="Fjern/skjul kalender fra listen"
-                  @click="store.hideCalendar(cal.id)"
+                  title="Gendan serverfarve"
+                  @click="store.setCalendarColorOverride(cal.id, null)"
                 >
-                  <EyeOff class="w-3 h-3" />
+                  <RotateCcw class="w-3 h-3" />
                 </button>
-              </template>
+                <label
+                  class="w-4 h-4 rounded-full border border-white/20 cursor-pointer flex items-center justify-center overflow-hidden shadow-inner ml-0.5"
+                  :style="{ backgroundColor: cal.color }"
+                  title="Klik for at overskrive kalenderfarven lokalt"
+                >
+                  <input
+                    type="color"
+                    :value="cal.color"
+                    class="opacity-0 w-0 h-0"
+                    @input="handleColorChange(cal.id, $event)"
+                  />
+                </label>
+              </div>
+            </div>
 
-              <button
-                v-if="cal.localColorOverride && cal.localColorOverride !== cal.serverColor"
-                type="button"
-                class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
-                title="Gendan serverfarve"
-                @click="store.setCalendarColorOverride(cal.id, null)"
-              >
-                <RotateCcw class="w-3 h-3" />
-              </button>
+            <form
+              v-if="editingCalId === cal.id && !store.isPublicShareMode"
+              class="pt-2 border-t border-slate-700/60 space-y-1.5"
+              @submit.prevent="submitRenameCalendar(cal)"
+            >
+              <div class="flex items-center gap-1">
+                <input
+                  ref="renameInputRef"
+                  v-model="renameDraft"
+                  type="text"
+                  maxlength="80"
+                  placeholder="F.eks. Annes kalender..."
+                  class="flex-1 min-w-0 px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  @keydown.escape.prevent="cancelRenameCalendar"
+                />
+                <button
+                  type="submit"
+                  :disabled="isRenamingCalendar"
+                  class="p-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white transition disabled:opacity-50 shrink-0"
+                  title="Gem navn"
+                >
+                  <Check class="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  class="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 transition shrink-0"
+                  title="Annullér"
+                  @click="cancelRenameCalendar"
+                >
+                  <X class="w-3 h-3" />
+                </button>
+              </div>
+
               <label
-                class="w-4 h-4 rounded-full border border-white/20 cursor-pointer flex items-center justify-center overflow-hidden shadow-inner ml-0.5"
-                :style="{ backgroundColor: cal.color }"
-                title="Klik for at overskrive kalenderfarven lokalt"
+                v-if="!cal.isShared && !cal.isSubscribed && !cal.id.startsWith('sub::')"
+                class="flex items-center gap-1.5 text-[10.5px] text-slate-300 cursor-pointer"
               >
                 <input
-                  type="color"
-                  :value="cal.color"
-                  class="opacity-0 w-0 h-0"
-                  @input="handleColorChange(cal.id, $event)"
+                  v-model="renameOnServer"
+                  type="checkbox"
+                  class="rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-0 cursor-pointer shrink-0"
                 />
+                <span>Omdøb også på Mailcow/SOGo</span>
               </label>
-            </div>
+              <div
+                v-else
+                class="text-[10px] text-slate-400 leading-tight"
+              >
+                Personligt alias-navn (synkroniseres på dine enheder)
+              </div>
+
+              <button
+                v-if="cal.localNameOverride && cal.serverName && cal.localNameOverride !== cal.serverName"
+                type="button"
+                :disabled="isRenamingCalendar"
+                class="w-full py-1 px-2 rounded-md bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-[10.5px] text-slate-300 flex items-center justify-center gap-1 transition disabled:opacity-50"
+                @click="resetCalendarName(cal)"
+              >
+                <RotateCcw class="w-2.5 h-2.5 shrink-0" />
+                <span class="truncate">Gendan originalt navn ({{ cal.serverName }})</span>
+              </button>
+            </form>
           </div>
 
           <!-- Automatisk Fødselsdagskalender fra Brogaard Kontakter (CardDAV) -->

@@ -21,12 +21,15 @@ export interface CalendarSource {
   id: string;
   url: string;
   name: string;
+  serverName?: string;    // Oprindeligt navn fra serveren (før lokalt/personligt alias)
+  localNameOverride?: string | null;
   color: string;          // Aktiv farve (kan være lokalt overskrevet)
   serverColor: string;    // SOGo's oprindelige serverfarve
   localColorOverride?: string | null;
   readOnly: boolean;      // Låser redigering, Drag & Drop og Ctrl+V hvis true
   isShared: boolean;      // Delt SOGo/Suite kalender
   sharePermission?: CalendarSharePermission;
+  userShareId?: string;
   isSubscribed?: boolean; // Eksternt kalender-abonnement (.ics / webcal / Danske Helligdage)
   subscriptionUrl?: string;
   owner?: string;

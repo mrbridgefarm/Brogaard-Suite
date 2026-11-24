@@ -15,6 +15,7 @@ export interface SuiteLoginResponse {
   folders: MailFolder[];
   aliases: SenderAlias[];
   calendars: Omit<CalendarSource, 'visible'>[];
+  nameOverrides?: Record<string, string>;
   caldavReady: boolean;
   error?: string;
 }

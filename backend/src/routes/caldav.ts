@@ -13,7 +13,8 @@ import {
   normalizeMailcowUrl,
   ensureTrailingSlash,
   createCalDavCalendar,
-  deleteCalDavCalendar
+  deleteCalDavCalendar,
+  renameCalDavCalendar
 } from '../services/davClient.js';
 import {
   type CalendarEventDTO,
@@ -34,10 +35,20 @@ import {
   upsertUserCalendarShare,
   updateUserCalendarSharePermission,
   deleteUserCalendarShare,
+  leaveIncomingUserCalendarShare,
   resolveIncomingSharesForRecipient,
   findAuthorizedIncomingShareForUrl,
   isUrlInsideSharedCalendar
 } from '../services/userShareStore.js';
+import {
+  getCalendarNameOverrides,
+  resolveCalendarNameOverride,
+  setCalendarNameOverride,
+  isSharedCalendarDismissed,
+  addDismissedSharedCalendar,
+  removeDismissedSharedCalendar,
+  removeDismissedSharedCalendarForEmails
+} from '../services/calendarPrefsStore.js';
 import { getAliasesForUser } from '../services/aliasStore.js';
 import {
   addUserSubscription,
@@ -139,17 +150,28 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
       : undefined;
 
     const identityEmails = getCallerIdentityEmails(creds.username);
+    const incomingShares = resolveIncomingSharesForRecipient(identityEmails);
+    const activeIncomingKeys = new Set(
+      incomingShares.map((item) => canonicalCalKey(item.share.calendarUrl))
+    );
+
     const [caldavCalendars, subData] = await Promise.all([
       fetchCalendars(creds),
       syncUserSubscriptions(creds, clientSubscriptions)
     ]);
 
-    const mergedCalendars: CalendarInfoDTO[] = [...caldavCalendars];
-    const caldavEvents = await fetchAllEvents(creds, caldavCalendars, timeRange);
+    const visibleCaldavCalendars = caldavCalendars.filter(
+      (c) =>
+        !c.isShared ||
+        activeIncomingKeys.has(canonicalCalKey(c.url)) ||
+        !isSharedCalendarDismissed(creds.username, c.id, c.url)
+    );
+
+    const mergedCalendars: CalendarInfoDTO[] = [...visibleCaldavCalendars];
+    const caldavEvents = await fetchAllEvents(creds, visibleCaldavCalendars, timeRange);
     const mergedEvents: CalendarEventDTO[] = [...caldavEvents];
 
     // Hent kalendere delt direkte med denne bruger i Brogaard Suite (Read / Write delegation)
-    const incomingShares = resolveIncomingSharesForRecipient(identityEmails);
     if (incomingShares.length > 0) {
       const shareSlug = (url: string): string => {
         try {
@@ -178,6 +200,7 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
             readOnly: share.permission !== 'write',
             isShared: true,
             sharePermission: share.permission,
+            userShareId: share.id,
             owner: share.ownerUsername
           };
           const sharedEvents = await fetchAllEvents(ownerCreds, [sharedCal], timeRange);
@@ -193,6 +216,7 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
 
         const exactMatch = mergedCalendars.find((c) => canonicalCalKey(c.url) === shareKey);
         if (exactMatch) {
+          exactMatch.userShareId = share.id;
           if (share.permission === 'write') {
             exactMatch.readOnly = false;
             exactMatch.isShared = true;
@@ -228,10 +252,28 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
       }
     }
 
+    const allCalendars = [...mergedCalendars, ...subData.calendars];
+    const savedNameOverrides = getCalendarNameOverrides(creds.username);
+    const clientNameOverrides: Record<string, string> = { ...savedNameOverrides };
+
+    for (const cal of allCalendars) {
+      const origName = cal.serverName || cal.name;
+      cal.serverName = origName;
+      const alias = resolveCalendarNameOverride(savedNameOverrides, cal.id, cal.url);
+      if (alias) {
+        cal.name = alias;
+        cal.localNameOverride = alias;
+        clientNameOverrides[cal.id] = alias;
+      } else {
+        cal.localNameOverride = null;
+      }
+    }
+
     sendCompressedJson(req, res, {
       ok: true,
-      calendars: [...mergedCalendars, ...subData.calendars],
+      calendars: allCalendars,
       events: [...mergedEvents, ...subData.events],
+      nameOverrides: clientNameOverrides,
       syncedAt: new Date().toISOString()
     });
   } catch (err: any) {
@@ -374,6 +416,9 @@ caldavRouter.post('/calendars', async (req: Request, res: Response) => {
       return;
     }
     const calendar = await createCalDavCalendar(creds, name || 'SOGo Kalender', color, calendarUrl);
+    if (calendarUrl) {
+      removeDismissedSharedCalendar(creds.username, calendarUrl);
+    }
     res.json({ ok: true, calendar });
   } catch (err: any) {
     console.error('Fejl ved oprettelse/tilføjelse af kalender:', err?.message || err);
@@ -780,6 +825,7 @@ caldavRouter.post('/user-shares', (req: Request, res: Response) => {
       recipientEmail,
       permission
     });
+    removeDismissedSharedCalendarForEmails([recipientEmail], calendarUrl);
 
     res.json({ ok: true, userShare });
   } catch (err: any) {
@@ -832,6 +878,106 @@ caldavRouter.delete('/user-shares/:id', (req: Request, res: Response) => {
     res.status(400).json({
       ok: false,
       error: err?.message || 'Kunne ikke tilbagekalde kalenderdeling.'
+    });
+  }
+});
+
+/**
+ * POST /api/caldav/user-shares/leave
+ * Lader en modtager forlade en delt kalender og fjerner vedkommendes egne rettigheder permanent.
+ */
+caldavRouter.post('/user-shares/leave', (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const shareId = req.body?.shareId ? String(req.body.shareId).trim() : undefined;
+    const calendarUrl = req.body?.calendarUrl ? String(req.body.calendarUrl).trim() : undefined;
+
+    if (!shareId && !calendarUrl) {
+      res.status(400).json({ ok: false, error: 'shareId eller calendarUrl mangler.' });
+      return;
+    }
+
+    const identityEmails = getCallerIdentityEmails(creds.username);
+    const { removedCount, removedOwners } = leaveIncomingUserCalendarShare(identityEmails, {
+      shareId,
+      calendarUrl
+    });
+
+    if (calendarUrl) {
+      addDismissedSharedCalendar(creds.username, calendarUrl);
+      setCalendarNameOverride(creds.username, calendarUrl, null);
+    }
+
+    res.json({ ok: true, removedCount, removedOwners });
+  } catch (err: any) {
+    res.status(400).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke forlade den delte kalender.'
+    });
+  }
+});
+
+/**
+ * PUT /api/caldav/calendar-name
+ * Gemmer et personligt alias-navn pr. bruger (synkroniseres på tværs af enheder)
+ * eller omdøber brugerens egen kalender direkte på Mailcow/SOGo via PROPPATCH.
+ */
+caldavRouter.put('/calendar-name', async (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const calendarId = String(req.body?.calendarId || '').trim();
+    const calendarUrl = String(req.body?.calendarUrl || '').trim();
+    const rawName = req.body?.name;
+    const renameOnServer = Boolean(req.body?.renameOnServer);
+
+    const primaryKey = calendarUrl || calendarId;
+    if (!primaryKey) {
+      res.status(400).json({ ok: false, error: 'calendarId eller calendarUrl mangler.' });
+      return;
+    }
+
+    const trimmedName = typeof rawName === 'string' ? rawName.trim().slice(0, 80) : '';
+
+    if (renameOnServer && trimmedName && calendarUrl) {
+      try {
+        await renameCalDavCalendar(creds, calendarUrl, trimmedName);
+        setCalendarNameOverride(creds.username, primaryKey, null, calendarId || undefined);
+        res.json({
+          ok: true,
+          renamedOnServer: true,
+          effectiveName: trimmedName,
+          localNameOverride: null
+        });
+        return;
+      } catch (renameErr: any) {
+        setCalendarNameOverride(creds.username, primaryKey, trimmedName, calendarId || undefined);
+        res.json({
+          ok: true,
+          renamedOnServer: false,
+          effectiveName: trimmedName,
+          localNameOverride: trimmedName,
+          fallbackReason: renameErr?.message || 'Serveren understøttede ikke direkte omdøbning.'
+        });
+        return;
+      }
+    }
+
+    setCalendarNameOverride(
+      creds.username,
+      primaryKey,
+      trimmedName || null,
+      calendarId || undefined
+    );
+    res.json({
+      ok: true,
+      renamedOnServer: false,
+      effectiveName: trimmedName || null,
+      localNameOverride: trimmedName || null
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke gemme kalendernavn.'
     });
   }
 });

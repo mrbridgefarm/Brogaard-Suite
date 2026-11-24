@@ -194,7 +194,7 @@ export const useSuiteStore = defineStore('suite', () => {
 
       await Promise.all([
         mailStore.hydrateAfterLogin(res),
-        calendarStore.hydrateAfterLogin(res.username, res.calendars || []),
+        calendarStore.hydrateAfterLogin(res.username, res.calendars || [], res.nameOverrides),
         contactsStore.syncWithServer(true)
       ]);
 

@@ -18,6 +18,8 @@ import {
   apiUpsertUserShare,
   apiUpdateUserSharePermission,
   apiDeleteUserShare,
+  apiLeaveSharedCalendar,
+  apiSetCalendarName,
   apiFetchPublicShare,
   apiImportIcs,
   apiExportIcs,
@@ -43,6 +45,7 @@ import type {
 } from '../types/calendar';
 
 const COLOR_OVERRIDE_KEY = 'dav_sync_cal_color_overrides_v1';
+const NAME_OVERRIDE_KEY = 'dav_sync_cal_name_overrides_v1';
 const HIDDEN_CAL_KEY = 'dav_sync_cal_hidden_calendars_v1';
 const SUBSCRIPTIONS_STORAGE_KEY = 'dav_sync_cal_subscriptions_v1';
 const SHOW_BIRTHDAYS_KEY = 'brogaard_suite_show_birthdays_v1';
@@ -176,6 +179,19 @@ export const useCalendarStore = defineStore('calendar', () => {
     localStorage.setItem(COLOR_OVERRIDE_KEY, JSON.stringify(overrides));
   }
 
+  function getNameOverrides(): Record<string, string> {
+    try {
+      const raw = localStorage.getItem(NAME_OVERRIDE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveNameOverrides(overrides: Record<string, string>) {
+    localStorage.setItem(NAME_OVERRIDE_KEY, JSON.stringify(overrides));
+  }
+
   function getCalendarById(calId: string): CalendarSource | undefined {
     if (calId === BIRTHDAY_CALENDAR_ID) {
       return {
@@ -291,12 +307,14 @@ export const useCalendarStore = defineStore('calendar', () => {
     if (!q) return [];
     return [...events.value, ...birthdayEvents.value]
       .filter((ev) => {
-        const calName = getCalendarById(ev.calendarId)?.name || '';
+        const cal = getCalendarById(ev.calendarId);
+        const calName = cal?.name || '';
+        const serverCalName = cal?.serverName || '';
         const attendeeStr = (ev.attendees || [])
           .map((a) => `${a.name || ''} ${a.email}`)
           .join(' ');
         const haystack =
-          `${ev.title} ${ev.location || ''} ${ev.description || ''} ${calName} ${attendeeStr}`.toLowerCase();
+          `${ev.title} ${ev.location || ''} ${ev.description || ''} ${calName} ${serverCalName} ${attendeeStr}`.toLowerCase();
         return haystack.includes(q);
       })
       .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
@@ -366,6 +384,7 @@ export const useCalendarStore = defineStore('calendar', () => {
 
     if (storedCalendars.length > 0) {
       applyColorOverridesToCalendars(storedCalendars);
+      applyNameOverridesToCalendars(storedCalendars);
       calendars.value = storedCalendars;
       events.value = storedEvents;
       if (!writableCalendars.value.some((c) => c.id === activeTargetCalendarId.value)) {
@@ -385,7 +404,8 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   async function hydrateAfterLogin(
     user: string,
-    initialServerCalendars: Omit<CalendarSource, 'visible'>[]
+    initialServerCalendars: Omit<CalendarSource, 'visible'>[],
+    initialNameOverrides?: Record<string, string>
   ) {
     session.value = {
       mode: 'CALDAV',
@@ -404,6 +424,7 @@ export const useCalendarStore = defineStore('calendar', () => {
         .filter((c) => !hiddenSet.has(c.id))
         .map((c) => ({ ...c, visible: true }));
       applyColorOverridesToCalendars(initialCals);
+      applyNameOverridesToCalendars(initialCals, initialNameOverrides);
       calendars.value = initialCals;
       if (!activeTargetCalendarId.value) {
         const preferred = pickDefaultTargetCalendar();
@@ -419,6 +440,7 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   function resetState() {
     session.value = null;
+    localStorage.removeItem(NAME_OVERRIDE_KEY);
     clearClipboard();
     selectedEventIds.value = [];
     clearUndoStack();
@@ -472,6 +494,37 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
   }
 
+  function applyNameOverridesToCalendars(
+    cals: CalendarSource[],
+    authoritativeOverrides?: Record<string, string>
+  ) {
+    const overrides =
+      authoritativeOverrides !== undefined ? { ...authoritativeOverrides } : getNameOverrides();
+    if (authoritativeOverrides !== undefined) {
+      saveNameOverrides(overrides);
+    }
+    for (const cal of cals) {
+      const baseName = cal.serverName || cal.name;
+      cal.serverName = baseName;
+      const alias =
+        (authoritativeOverrides !== undefined && cal.localNameOverride
+          ? cal.localNameOverride
+          : null) ||
+        overrides[cal.id] ||
+        overrides[cal.url] ||
+        overrides[cal.id.toLowerCase()] ||
+        overrides[cal.url.toLowerCase()] ||
+        null;
+      if (alias && alias.trim()) {
+        cal.localNameOverride = alias.trim();
+        cal.name = alias.trim();
+      } else {
+        cal.localNameOverride = null;
+        cal.name = baseName;
+      }
+    }
+  }
+
   async function syncWithServer(silent = false) {
     if (!session.value) return;
 
@@ -517,6 +570,7 @@ export const useCalendarStore = defineStore('calendar', () => {
         ...localSubCalendars
       ]);
       applyColorOverridesToCalendars(mergedCalendars);
+      applyNameOverridesToCalendars(mergedCalendars, res.nameOverrides || {});
       const localSubCalIds = new Set(localSubCalendars.map((c) => c.id));
       const preservedSubEvents = events.value
         .filter((e) => localSubCalIds.has(e.calendarId))
@@ -914,6 +968,100 @@ export const useCalendarStore = defineStore('calendar', () => {
     if (!isPublicShareMode.value) {
       await db.calendars.put(clonePlain(cal));
     }
+  }
+
+  async function setCalendarNameOverride(
+    calId: string,
+    newName: string | null,
+    renameOnServer = false
+  ): Promise<boolean> {
+    if (isPublicShareMode.value || calId === BIRTHDAY_CALENDAR_ID) return false;
+    const cal = getCalendarById(calId);
+    if (!cal) return false;
+
+    cal.serverName = cal.serverName || cal.name;
+    const trimmed = typeof newName === 'string' ? newName.trim().slice(0, 80) : '';
+    const isOwnCalDav = !cal.isShared && !cal.isSubscribed && !cal.id.startsWith('sub::');
+    const wantServerRename = Boolean(renameOnServer && trimmed && isOwnCalDav);
+    const overrides = getNameOverrides();
+
+    if (isOnline.value && session.value?.mode === 'CALDAV') {
+      let res: {
+        renamedOnServer: boolean;
+        effectiveName: string | null;
+        localNameOverride: string | null;
+        fallbackReason?: string;
+      };
+      try {
+        res = await apiSetCalendarName({
+          calendarId: cal.id,
+          calendarUrl: cal.url,
+          name: trimmed || null,
+          renameOnServer: wantServerRename
+        });
+      } catch (err: any) {
+        notify('Kunne ikke omdøbe kalender', err?.message || String(err), 'error');
+        return false;
+      }
+
+      if (res.renamedOnServer && trimmed) {
+        delete overrides[cal.id];
+        delete overrides[cal.url];
+        delete overrides[cal.id.toLowerCase()];
+        delete overrides[cal.url.toLowerCase()];
+        cal.serverName = trimmed;
+        cal.name = trimmed;
+        cal.localNameOverride = null;
+        notify(
+          'Kalender omdøbt',
+          `"${trimmed}" er nu gemt både i Brogaard Suite og på Mailcow/SOGo.`,
+          'success'
+        );
+      } else if (trimmed) {
+        overrides[cal.id] = trimmed;
+        cal.localNameOverride = trimmed;
+        cal.name = trimmed;
+        if (wantServerRename && res.fallbackReason) {
+          notify(
+            'Alias-navn gemt',
+            `Serveren tillod ikke direkte omdøbning, så "${trimmed}" er gemt som dit alias-navn på alle enheder.`,
+            'info'
+          );
+        } else {
+          notify(
+            'Alias-navn gemt',
+            `Kalenderen vises nu som "${trimmed}" på alle dine enheder.`,
+            'success'
+          );
+        }
+      } else {
+        delete overrides[cal.id];
+        delete overrides[cal.url];
+        delete overrides[cal.id.toLowerCase()];
+        delete overrides[cal.url.toLowerCase()];
+        cal.localNameOverride = null;
+        cal.name = cal.serverName;
+        notify('Originalt navn gendannet', `Kalenderen vises nu igen som "${cal.name}".`, 'info');
+      }
+    } else {
+      if (trimmed) {
+        overrides[cal.id] = trimmed;
+        cal.localNameOverride = trimmed;
+        cal.name = trimmed;
+      } else {
+        delete overrides[cal.id];
+        delete overrides[cal.url];
+        delete overrides[cal.id.toLowerCase()];
+        delete overrides[cal.url.toLowerCase()];
+        cal.localNameOverride = null;
+        cal.name = cal.serverName;
+      }
+      notify('Navn gemt lokalt', 'Ændringen gemmes lokalt, da du er offline.', 'warning');
+    }
+
+    saveNameOverrides(overrides);
+    await db.calendars.put(clonePlain(cal));
+    return true;
   }
 
   const UNDO_TTL_MS = 30_000;
@@ -1834,6 +1982,69 @@ export const useCalendarStore = defineStore('calendar', () => {
     notify('Kalender slettet', `"${cal.name}" og dens begivenheder er slettet.`, 'info');
   }
 
+  async function leaveSharedCalendar(calId: string): Promise<boolean> {
+    if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return false;
+    const cal = getCalendarById(calId);
+    if (!cal || !cal.isShared || cal.isSubscribed || cal.id.startsWith('sub::')) {
+      return false;
+    }
+
+    if (!isOnline.value) {
+      notify(
+        'Offline',
+        'Du skal være online for at forlade en delt kalender og fjerne dine rettigheder.',
+        'warning'
+      );
+      return false;
+    }
+
+    let res: { removedCount: number; removedOwners: string[] };
+    try {
+      res = await apiLeaveSharedCalendar({
+        shareId: cal.userShareId,
+        calendarUrl: cal.url
+      });
+    } catch (err: any) {
+      notify('Kunne ikke forlade delt kalender', err?.message || String(err), 'error', 9000);
+      return false;
+    }
+
+    const nameOverrides = getNameOverrides();
+    delete nameOverrides[cal.id];
+    delete nameOverrides[cal.url];
+    delete nameOverrides[cal.id.toLowerCase()];
+    delete nameOverrides[cal.url.toLowerCase()];
+    saveNameOverrides(nameOverrides);
+
+    const colorOverrides = getColorOverrides();
+    delete colorOverrides[cal.id];
+    delete colorOverrides[cal.url];
+    saveColorOverrides(colorOverrides);
+
+    if (hiddenCalendarIds.value.includes(calId)) {
+      hiddenCalendarIds.value = hiddenCalendarIds.value.filter((id) => id !== calId);
+      persistHiddenCalendars();
+    }
+
+    await removeCalendarLocally(calId);
+
+    if (res.removedCount > 0) {
+      notify(
+        'Forlod delt kalender',
+        `Dine adgangsrettigheder til "${cal.name}" er nu fjernet, og kalenderen er fjernet fra din oversigt.`,
+        'success'
+      );
+    } else {
+      notify(
+        'Delt kalender fjernet',
+        `"${cal.name}" er fjernet fra din konto i Brogaard Suite. Hvis den blev delt direkte i SOGo, kan ejeren også fjerne delingen dér.`,
+        'info'
+      );
+    }
+
+    return true;
+  }
+
   async function hideCalendar(calId: string) {
     const cal = getCalendarById(calId);
     if (!cal || calId === BIRTHDAY_CALENDAR_ID) return;
@@ -2061,6 +2272,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     exportCalendarIcs,
     toggleCalendarVisibility,
     setCalendarColorOverride,
+    setCalendarNameOverride,
     saveEvent,
     deleteEventsByIds,
     bulkDeleteEvents,
@@ -2080,6 +2292,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     createCalendar,
     subscribeToCalendar,
     deleteCalendar,
+    leaveSharedCalendar,
     hideCalendar,
     restoreHiddenCalendars
   };

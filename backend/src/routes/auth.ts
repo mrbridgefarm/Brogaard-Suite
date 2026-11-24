@@ -9,6 +9,11 @@ import {
   resolveIncomingSharesForRecipient
 } from '../services/userShareStore.js';
 import {
+  getCalendarNameOverrides,
+  resolveCalendarNameOverride,
+  isSharedCalendarDismissed
+} from '../services/calendarPrefsStore.js';
+import {
   createRateLimiter,
   getSessionFromCookie,
   setSessionCookie,
@@ -159,6 +164,7 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
         })
     ]);
 
+    const activeIncomingNorms = new Set<string>();
     try {
       const incoming = resolveIncomingSharesForRecipient([
         username,
@@ -169,15 +175,19 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
       );
       for (const { share } of incoming) {
         const norm = decodeURIComponent(share.calendarUrl).toLowerCase().replace(/\/+$/, '');
+        activeIncomingNorms.add(norm);
         if (existingNorms.has(norm)) {
           const match = calendars.find(
             (c) => decodeURIComponent(c.url || '').toLowerCase().replace(/\/+$/, '') === norm
           );
-          if (match && share.permission === 'write') {
-            match.readOnly = false;
-            match.isShared = true;
-            match.owner = share.ownerUsername;
-            match.sharePermission = 'write';
+          if (match) {
+            match.userShareId = share.id;
+            if (share.permission === 'write') {
+              match.readOnly = false;
+              match.isShared = true;
+              match.owner = share.ownerUsername;
+              match.sharePermission = 'write';
+            }
           }
         } else {
           calendars.push({
@@ -189,6 +199,7 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
             readOnly: share.permission !== 'write',
             isShared: true,
             sharePermission: share.permission,
+            userShareId: share.id,
             owner: share.ownerUsername
           });
         }
@@ -197,12 +208,44 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
       // Ignorér hvis incoming share opslag fejler ved login
     }
 
+    try {
+      calendars = calendars.filter(
+        (c) =>
+          !c.isShared ||
+          activeIncomingNorms.has(decodeURIComponent(c.url || '').toLowerCase().replace(/\/+$/, '')) ||
+          !isSharedCalendarDismissed(username, c.id, c.url)
+      );
+    } catch {
+      // Ignorér filtreringsfejl
+    }
+
+    let nameOverrides: Record<string, string> = {};
+    try {
+      const savedNameOverrides = getCalendarNameOverrides(username);
+      nameOverrides = { ...savedNameOverrides };
+      for (const cal of calendars) {
+        const origName = cal.serverName || cal.name;
+        cal.serverName = origName;
+        const alias = resolveCalendarNameOverride(savedNameOverrides, cal.id, cal.url);
+        if (alias) {
+          cal.name = alias;
+          cal.localNameOverride = alias;
+          nameOverrides[cal.id] = alias;
+        } else {
+          cal.localNameOverride = null;
+        }
+      }
+    } catch {
+      // Ignorér hvis kalender-præferencer fejler ved login
+    }
+
     res.json({
       ok: true,
       username,
       folders,
       aliases,
       calendars,
+      nameOverrides,
       caldavReady
     });
   } catch (err: any) {

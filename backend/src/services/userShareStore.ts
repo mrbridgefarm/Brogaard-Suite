@@ -275,6 +275,53 @@ export function deleteUserCalendarShare(ownerUsername: string, shareId: string):
   return true;
 }
 
+/**
+ * Lader en modtager forlade en delt kalender og fjerner vedkommendes adgangsrettigheder permanent.
+ */
+export function leaveIncomingUserCalendarShare(
+  recipientEmails: string[],
+  params: { shareId?: string; calendarUrl?: string }
+): { removedCount: number; removedOwners: string[] } {
+  const recipientSet = new Set(
+    recipientEmails.map((e) => e.toLowerCase().trim()).filter(Boolean)
+  );
+  if (recipientSet.size === 0) {
+    return { removedCount: 0, removedOwners: [] };
+  }
+
+  const cleanShareId = (params.shareId || '').trim();
+  const targetCanonical = params.calendarUrl ? canonicalizeUrl(params.calendarUrl) : '';
+  if (!cleanShareId && !targetCanonical) {
+    return { removedCount: 0, removedOwners: [] };
+  }
+
+  const all = readAllUserShares();
+  const removed: UserCalendarShareRecord[] = [];
+  const kept: UserCalendarShareRecord[] = [];
+
+  for (const r of all) {
+    const isMyIncomingShare = recipientSet.has(r.recipientEmail.toLowerCase().trim());
+    const matchesTarget =
+      (cleanShareId && r.id === cleanShareId) ||
+      (targetCanonical && canonicalizeUrl(r.calendarUrl) === targetCanonical);
+
+    if (isMyIncomingShare && matchesTarget) {
+      removed.push(r);
+    } else {
+      kept.push(r);
+    }
+  }
+
+  if (removed.length > 0) {
+    writeAllUserShares(kept);
+  }
+
+  return {
+    removedCount: removed.length,
+    removedOwners: Array.from(new Set(removed.map((r) => r.ownerUsername)))
+  };
+}
+
 export function resolveIncomingSharesForRecipient(
   recipientEmails: string[]
 ): Array<{ share: UserCalendarSharePublicInfo; ownerCreds: CalDavCredentials }> {

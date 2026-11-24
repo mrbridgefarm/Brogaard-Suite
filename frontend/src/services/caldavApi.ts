@@ -11,6 +11,7 @@ export interface SyncResponse {
   ok: boolean;
   calendars: Omit<CalendarSource, 'visible'>[];
   events: CalendarEvent[];
+  nameOverrides?: Record<string, string>;
   syncedAt: string;
   error?: string;
 }
@@ -244,6 +245,55 @@ export async function apiDeleteUserShare(shareId: string): Promise<void> {
   if (!res.ok || !data.ok) {
     throw new Error(data.error || 'Kunne ikke tilbagekalde bruger-deling.');
   }
+}
+
+export async function apiLeaveSharedCalendar(params: {
+  shareId?: string;
+  calendarUrl?: string;
+}): Promise<{ removedCount: number; removedOwners: string[] }> {
+  const res = await fetch('/api/caldav/user-shares/leave', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(params)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke forlade den delte kalender.');
+  }
+  return {
+    removedCount: Number(data.removedCount || 0),
+    removedOwners: Array.isArray(data.removedOwners) ? data.removedOwners : []
+  };
+}
+
+export async function apiSetCalendarName(params: {
+  calendarId: string;
+  calendarUrl?: string;
+  name: string | null;
+  renameOnServer?: boolean;
+}): Promise<{
+  renamedOnServer: boolean;
+  effectiveName: string | null;
+  localNameOverride: string | null;
+  fallbackReason?: string;
+}> {
+  const res = await fetch('/api/caldav/calendar-name', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(params)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke omdøbe kalenderen.');
+  }
+  return {
+    renamedOnServer: Boolean(data.renamedOnServer),
+    effectiveName: data.effectiveName ?? null,
+    localNameOverride: data.localNameOverride ?? null,
+    fallbackReason: data.fallbackReason
+  };
 }
 
 export async function apiFetchPublicShare(token: string): Promise<PublicShareResponse> {

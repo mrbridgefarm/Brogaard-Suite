@@ -17,11 +17,14 @@ export interface CalDavCredentials {
 export interface CalendarInfoDTO {
   id: string;
   name: string;
+  serverName?: string;
+  localNameOverride?: string | null;
   color: string;
   serverColor: string;
   readOnly: boolean;
   isShared: boolean;
   sharePermission?: 'read' | 'write';
+  userShareId?: string;
   isSubscribed?: boolean;
   subscriptionUrl?: string;
   owner?: string;
@@ -1256,6 +1259,63 @@ export async function deleteCalDavCalendar(
   calendarUrl: string
 ): Promise<void> {
   await davRequest(creds, 'DELETE', ensureTrailingSlash(calendarUrl));
+}
+
+/**
+ * Omdøber en af brugerens egne kalendere direkte på Mailcow/SOGo via CalDAV PROPPATCH.
+ */
+export async function renameCalDavCalendar(
+  creds: CalDavCredentials,
+  calendarUrl: string,
+  newName: string
+): Promise<void> {
+  const cleanName = newName.trim().slice(0, 80);
+  if (!cleanName) {
+    throw new Error('Kalendernavnet må ikke være tomt.');
+  }
+
+  const targetUrl = ensureTrailingSlash(calendarUrl.trim());
+  assertSameServerOrigin(targetUrl, creds);
+
+  let decoded = targetUrl;
+  try {
+    decoded = decodeURIComponent(targetUrl);
+  } catch {
+    decoded = targetUrl;
+  }
+
+  if (/_shared_/i.test(decoded) || /\/Calendar\/public(?:\/|$)/i.test(decoded)) {
+    throw new Error('Delte eller offentlige kalendere kan ikke omdøbes på serveren.');
+  }
+
+  const sogoOwnerMatch = decoded.match(/\/SOGo\/dav\/([^/]+)\//i);
+  if (sogoOwnerMatch && sogoOwnerMatch[1]) {
+    const urlOwner = sogoOwnerMatch[1].toLowerCase().trim();
+    const userLower = creds.username.toLowerCase().trim();
+    if (urlOwner !== userLower && urlOwner !== userLower.split('@')[0]) {
+      throw new Error('Du kan kun omdøbe dine egne kalendere på serveren.');
+    }
+  }
+
+  const body = `<?xml version="1.0" encoding="utf-8"?>
+<D:propertyupdate xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <D:displayname>${escapeXml(cleanName)}</D:displayname>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>`;
+
+  const res = await davRequest(creds, 'PROPPATCH', targetUrl, body, {
+    'Content-Type': 'application/xml; charset=utf-8'
+  });
+
+  if (res.status === 207) {
+    const xml = await readResponseTextSmart(res);
+    if (/<(?:[a-zA-Z0-9_-]+:)?propstat\b/i.test(xml) && !extractOkPropstatXml(xml).trim()) {
+      throw new Error('CalDAV-serveren afviste omdøbning af kalenderen.');
+    }
+  }
 }
 
 /**
