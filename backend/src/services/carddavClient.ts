@@ -6,7 +6,8 @@ import {
   ensureTrailingSlash,
   assertSameServerOrigin,
   readResponseTextSmart,
-  buildForwardedIpHeaders
+  buildForwardedIpHeaders,
+  createForwardedIpFetch
 } from './davClient.js';
 import { normalizeDanishText, sanitizeHttpUrl } from './icalMapper.js';
 
@@ -279,6 +280,7 @@ export async function fetchAddressBooks(creds: CalDavCredentials): Promise<Addre
         },
         authMethod: 'Basic',
         defaultAccountType: 'carddav',
+        fetch: createForwardedIpFetch(serverUrl, creds.clientIp),
         ...(Object.keys(ipHeaders).length > 0 ? { fetchOptions: { headers: ipHeaders } } : {})
       });
 

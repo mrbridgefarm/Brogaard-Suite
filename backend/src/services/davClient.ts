@@ -228,6 +228,56 @@ export function buildForwardedIpHeaders(clientIp?: string): Record<string, strin
 }
 
 /**
+ * Custom fetch-wrapper til tsdav så samtlige interne CalDAV/CardDAV-kald
+ * (inkl. /.well-known discovery og redirects på samme origin) altid bærer klientens IP.
+ */
+export function createForwardedIpFetch(serverUrl: string, clientIp?: string): typeof fetch {
+  const ipHeaders = buildForwardedIpHeaders(clientIp);
+  if (Object.keys(ipHeaders).length === 0) {
+    return globalThis.fetch.bind(globalThis);
+  }
+
+  let serverOrigin = '';
+  try {
+    serverOrigin = new URL(normalizeMailcowUrl(serverUrl)).origin.toLowerCase();
+  } catch {
+    return globalThis.fetch.bind(globalThis);
+  }
+
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const rawUrl =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+
+    let sameOrigin = false;
+    try {
+      sameOrigin = Boolean(serverOrigin) && new URL(rawUrl).origin.toLowerCase() === serverOrigin;
+    } catch {
+      sameOrigin = false;
+    }
+
+    if (!sameOrigin) {
+      return globalThis.fetch(input, init);
+    }
+
+    const mergedHeaders = new Headers(
+      init?.headers ?? (input instanceof Request ? input.headers : undefined)
+    );
+    for (const [key, value] of Object.entries(ipHeaders)) {
+      mergedHeaders.set(key, value);
+    }
+
+    return globalThis.fetch(input, {
+      ...init,
+      headers: mergedHeaders
+    });
+  };
+}
+
+/**
  * Direkte, status-tjekket HTTP/DAV-request mod Mailcow/SOGo.
  */
 export async function davRequest(
@@ -395,6 +445,7 @@ export async function connectCalDav(creds: CalDavCredentials) {
     },
     authMethod: 'Basic',
     defaultAccountType: 'caldav',
+    fetch: createForwardedIpFetch(serverUrl, creds.clientIp),
     ...(Object.keys(ipHeaders).length > 0 ? { fetchOptions: { headers: ipHeaders } } : {})
   });
 

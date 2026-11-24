@@ -80,6 +80,7 @@ import {
 } from '../services/subscriptionService.js';
 import {
   createRateLimiter,
+  extractClientIp,
   getSessionFromCookie,
   requireDavCredentials
 } from '../services/sessionAuth.js';
@@ -115,7 +116,10 @@ function resolveEffectiveDavCredentials(
     );
   }
   return {
-    creds: incomingMatch.ownerCreds,
+    creds: {
+      ...incomingMatch.ownerCreds,
+      clientIp: callerCreds.clientIp
+    },
     sharedCalendarUrl: incomingMatch.share.calendarUrl
   };
 }
@@ -232,8 +236,12 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
 
       const fetchedShares = await Promise.allSettled(
         incomingShares.map(async ({ share, ownerCreds }) => {
+          const effectiveOwnerCreds: CalDavCredentials = {
+            ...ownerCreds,
+            clientIp: creds.clientIp
+          };
           const calMeta = await fetchSingleCalendarByUrl(
-            ownerCreds,
+            effectiveOwnerCreds,
             share.calendarUrl,
             share.calendarName,
             share.calendarColor
@@ -251,7 +259,7 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
             userShareId: share.id,
             owner: share.ownerUsername
           };
-          const sharedEvents = await fetchAllEvents(ownerCreds, [sharedCal], timeRange);
+          const sharedEvents = await fetchAllEvents(effectiveOwnerCreds, [sharedCal], timeRange);
           return { share, sharedCal, sharedEvents };
         })
       );
@@ -834,7 +842,11 @@ caldavRouter.get('/public/:token', publicShareLimiter, async (req: Request, res:
       return;
     }
 
-    const { record, creds } = resolved;
+    const { record, creds: rawOwnerCreds } = resolved;
+    const creds: CalDavCredentials = {
+      ...rawOwnerCreds,
+      clientIp: extractClientIp(req)
+    };
     const allCalendars = await fetchCalendars(creds);
     const allowedSet = new Set(
       record.calendarUrls.map((u) => decodeURIComponent(u).toLowerCase().replace(/\/+$/, ''))
