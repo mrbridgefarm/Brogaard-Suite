@@ -41,6 +41,8 @@ export interface Contact {
   emails: ContactEmail[];
   phones: ContactPhone[];
   birthday?: string;
+  anniversary?: string;
+  anniversaryLabel?: string;
   address?: ContactAddress;
   website?: string;
   notes?: string;

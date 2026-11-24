@@ -23,8 +23,14 @@ import {
   UserPlus,
   Loader2
 } from 'lucide-vue-next';
-import { useCalendarStore } from '../../stores/calendarStore';
-import { useContactsStore } from '../../stores/contactsStore';
+import {
+  useCalendarStore,
+  BIRTHDAY_CALENDAR_ID
+} from '../../stores/calendarStore';
+import {
+  useContactsStore,
+  DEFAULT_CONTACT_CALENDAR_COLOR
+} from '../../stores/contactsStore';
 import { useTheme } from '../../composables/useTheme';
 import { requestNotificationPermission } from '../../services/notifications';
 import type {
@@ -842,32 +848,64 @@ function removeSingleClipboardEvent(evId: string) {
             </form>
           </div>
 
-          <!-- Automatisk Fødselsdagskalender fra Brogaard Kontakter (CardDAV) -->
+          <!-- Automatisk Fødselsdags- & Mærkedagskalender fra Brogaard Kontakter (CardDAV) -->
           <div
-            v-if="!store.isPublicShareMode && contactsStore.contactsWithBirthdaysCount > 0"
+            v-if="!store.isPublicShareMode && contactsStore.contactsWithSpecialDatesCount > 0"
             class="p-2 rounded-xl border transition flex items-center justify-between gap-1.5"
             :class="store.showContactBirthdays
-              ? 'bg-pink-950/25 border-pink-500/40'
+              ? 'bg-slate-800/60 border-slate-700/70'
               : 'bg-slate-900/40 border-slate-800/50 opacity-60'"
           >
             <label class="flex items-center gap-2 min-w-0 cursor-pointer flex-1">
               <input
                 type="checkbox"
                 :checked="store.showContactBirthdays"
-                class="rounded border-slate-600 bg-slate-900 text-pink-500 focus:ring-0 cursor-pointer shrink-0"
+                class="rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-0 cursor-pointer shrink-0"
                 @change="store.toggleContactBirthdays()"
               />
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1">
-                  <Cake class="w-3 h-3 text-pink-400 shrink-0" />
-                  <span class="text-xs font-medium text-slate-100 truncate">Fødselsdage</span>
+                  <Cake
+                    class="w-3 h-3 shrink-0"
+                    :style="{ color: contactsStore.contactCalendarColor }"
+                  />
+                  <span class="text-xs font-medium text-slate-100 truncate">
+                    {{
+                      contactsStore.contactsWithAnniversariesCount > 0
+                        ? 'Fødselsdage & Mærkedage'
+                        : 'Fødselsdage'
+                    }}
+                  </span>
                 </div>
                 <div class="text-[10px] text-slate-400 truncate">
-                  {{ contactsStore.contactsWithBirthdaysCount }} fra Kontakter
+                  {{ contactsStore.contactsWithSpecialDatesCount }} kontakt(er) med datoer
                 </div>
               </div>
             </label>
-            <span class="w-3.5 h-3.5 rounded-full bg-pink-500 border border-white/20 shrink-0"></span>
+
+            <div class="flex items-center gap-0.5 shrink-0">
+              <button
+                v-if="contactsStore.contactCalendarColor.toLowerCase() !== DEFAULT_CONTACT_CALENDAR_COLOR"
+                type="button"
+                class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                title="Gendan standardfarve"
+                @click="store.setCalendarColorOverride(BIRTHDAY_CALENDAR_ID, null)"
+              >
+                <RotateCcw class="w-3 h-3" />
+              </button>
+              <label
+                class="w-4 h-4 rounded-full border border-white/20 cursor-pointer flex items-center justify-center overflow-hidden shadow-inner ml-0.5"
+                :style="{ backgroundColor: contactsStore.contactCalendarColor }"
+                title="Klik for at skifte kalenderfarve på fødselsdage og mærkedage"
+              >
+                <input
+                  type="color"
+                  :value="contactsStore.contactCalendarColor"
+                  class="opacity-0 w-0 h-0"
+                  @input="handleColorChange(BIRTHDAY_CALENDAR_ID, $event)"
+                />
+              </label>
+            </div>
           </div>
         </div>
 

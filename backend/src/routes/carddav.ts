@@ -17,6 +17,7 @@ import {
   canonicalContactPrefKey,
   getUserContactPrefs,
   setUserContactFavorite,
+  setUserContactCalendarColor,
   clearUserContactUnstarOverride
 } from '../services/contactPrefsStore.js';
 
@@ -65,11 +66,13 @@ carddavRouter.post('/sync', async (req: Request, res: Response) => {
     const addressBooks = await fetchAddressBooks(creds);
     const rawContacts = await fetchAllContacts(creds, addressBooks);
     const contacts = applyFavoritePrefsToContacts(creds.username, rawContacts);
+    const prefs = getUserContactPrefs(creds.username);
 
     sendCompressedJson(req, res, {
       ok: true,
       addressBooks,
       contacts,
+      calendarColor: prefs.calendarColor || null,
       syncedAt: new Date().toISOString()
     });
   } catch (err: any) {
@@ -167,6 +170,30 @@ carddavRouter.post('/favorite', async (req: Request, res: Response) => {
     res.status(500).json({
       ok: false,
       error: err?.message || 'Kunne ikke opdatere favorit-status.'
+    });
+  }
+});
+
+/**
+ * PUT /api/carddav/prefs
+ * Gemmer brugerens valgte kalenderfarve til kontakt-fødselsdage/mærkedage på tværs af enheder.
+ */
+carddavRouter.put('/prefs', (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const rawColor = req.body?.calendarColor;
+    const savedColor = setUserContactCalendarColor(
+      creds.username,
+      typeof rawColor === 'string' ? rawColor : null
+    );
+    res.json({
+      ok: true,
+      calendarColor: savedColor
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke gemme kontaktpræferencer.'
     });
   }
 });

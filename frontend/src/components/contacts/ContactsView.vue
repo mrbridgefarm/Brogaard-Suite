@@ -8,6 +8,7 @@ import {
   Phone,
   Building2,
   Cake,
+  Heart,
   MapPin,
   Globe,
   FileText,
@@ -367,15 +368,15 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
             </div>
           </div>
 
-          <!-- Bund: Fødselsdage-status -->
+          <!-- Bund: Fødselsdage & Mærkedage-status -->
           <div class="pt-3 border-t border-white/10 space-y-2">
             <div
-              v-if="store.contactsWithBirthdaysCount > 0"
+              v-if="store.contactsWithSpecialDatesCount > 0"
               class="p-2.5 rounded-xl bg-pink-500/10 border border-pink-500/25 text-[11px] text-pink-200 flex items-start gap-2"
             >
               <Cake class="w-4 h-4 text-pink-400 shrink-0 mt-0.5" />
               <span>
-                <strong>{{ store.contactsWithBirthdaysCount }}</strong> fødselsdag(e) vises automatisk i din kalender.
+                <strong>{{ store.contactsWithSpecialDatesCount }}</strong> kontakt(er) med fødselsdag/mærkedag vises automatisk i din kalender.
               </span>
             </div>
           </div>
@@ -508,6 +509,11 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
                     v-if="contact.birthday"
                     class="w-3 h-3 text-pink-400 shrink-0"
                     :title="`Fødselsdag: ${contact.birthday}`"
+                  />
+                  <Heart
+                    v-if="contact.anniversary"
+                    class="w-3 h-3 text-rose-400 shrink-0"
+                    :title="`${contact.anniversaryLabel || 'Bryllupsdag'}: ${contact.anniversary}`"
                   />
                   <button
                     type="button"
@@ -786,6 +792,20 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
               </div>
               <div class="text-slate-100 font-medium">
                 {{ formatBirthdayLabel(store.selectedContact.birthday) }}
+              </div>
+            </div>
+
+            <!-- Bryllupsdag / Mærkedag -->
+            <div
+              v-if="store.selectedContact.anniversary"
+              class="p-4 rounded-2xl bg-black/25 border border-white/10 space-y-1.5"
+            >
+              <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <Heart class="w-3.5 h-3.5 text-rose-400" />
+                <span>{{ store.selectedContact.anniversaryLabel || 'Bryllupsdag' }}</span>
+              </div>
+              <div class="text-slate-100 font-medium">
+                {{ formatBirthdayLabel(store.selectedContact.anniversary) }}
               </div>
             </div>
 

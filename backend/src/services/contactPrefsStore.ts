@@ -5,6 +5,7 @@ import { getWritableDataDir, getCandidateDataDirs } from './cryptoStore.js';
 export interface UserContactPrefs {
   favoriteContacts: string[];
   unstarredOverrides: string[];
+  calendarColor?: string;
 }
 
 type AllContactPrefs = Record<string, UserContactPrefs>;
@@ -27,9 +28,12 @@ function normalizeList(raw: unknown): string[] {
 }
 
 function normalizePrefsEntry(raw: any): UserContactPrefs {
+  const rawColor = typeof raw?.calendarColor === 'string' ? raw.calendarColor.trim() : '';
+  const calendarColor = /^#[0-9a-fA-F]{6}$/.test(rawColor) ? rawColor.toLowerCase() : undefined;
   return {
     favoriteContacts: normalizeList(raw?.favoriteContacts),
-    unstarredOverrides: normalizeList(raw?.unstarredOverrides)
+    unstarredOverrides: normalizeList(raw?.unstarredOverrides),
+    ...(calendarColor ? { calendarColor } : {})
   };
 }
 
@@ -38,7 +42,8 @@ function cloneAllPrefs(data: AllContactPrefs): AllContactPrefs {
   for (const [userKey, entry] of Object.entries(data)) {
     copy[userKey] = {
       favoriteContacts: [...entry.favoriteContacts],
-      unstarredOverrides: [...entry.unstarredOverrides]
+      unstarredOverrides: [...entry.unstarredOverrides],
+      ...(entry.calendarColor ? { calendarColor: entry.calendarColor } : {})
     };
   }
   return copy;
@@ -113,9 +118,26 @@ export function setUserContactFavorite(
 
   all[userKey] = {
     favoriteContacts: Array.from(favSet),
-    unstarredOverrides: Array.from(unstarSet)
+    unstarredOverrides: Array.from(unstarSet),
+    ...(current.calendarColor ? { calendarColor: current.calendarColor } : {})
   };
   writeAllPrefs(all);
+}
+
+export function setUserContactCalendarColor(username: string, color: string | null): string | null {
+  const all = readAllPrefs();
+  const userKey = username.toLowerCase().trim();
+  const current = all[userKey] || { favoriteContacts: [], unstarredOverrides: [] };
+  const clean = typeof color === 'string' ? color.trim().toLowerCase() : '';
+  const validColor = /^#[0-9a-f]{6}$/.test(clean) ? clean : undefined;
+
+  all[userKey] = {
+    favoriteContacts: current.favoriteContacts,
+    unstarredOverrides: current.unstarredOverrides,
+    ...(validColor ? { calendarColor: validColor } : {})
+  };
+  writeAllPrefs(all);
+  return validColor || null;
 }
 
 export function clearUserContactUnstarOverride(username: string, contactId: string): void {
@@ -129,7 +151,8 @@ export function clearUserContactUnstarOverride(username: string, contactId: stri
   if (nextUnstar.length !== current.unstarredOverrides.length) {
     all[userKey] = {
       favoriteContacts: current.favoriteContacts,
-      unstarredOverrides: nextUnstar
+      unstarredOverrides: nextUnstar,
+      ...(current.calendarColor ? { calendarColor: current.calendarColor } : {})
     };
     writeAllPrefs(all);
   }

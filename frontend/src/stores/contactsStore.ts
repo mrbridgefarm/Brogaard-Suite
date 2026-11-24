@@ -7,10 +7,14 @@ import {
   apiSyncCardDav,
   apiSaveContact,
   apiToggleContactFavorite,
+  apiSaveContactCalendarColor,
   apiDeleteContact,
   apiImportVcf,
   apiExportVcf
 } from '../services/carddavApi';
+
+export const DEFAULT_CONTACT_CALENDAR_COLOR = '#ec4899';
+const CONTACT_CAL_COLOR_STORAGE_KEY = 'brogaard_contact_calendar_color_v1';
 
 function toPlainObject<T>(val: T): T {
   if (val === null || val === undefined) return val;
@@ -33,6 +37,9 @@ export const useContactsStore = defineStore('contacts', () => {
 
   const editingContact = ref<Contact | null>(null);
   const isContactModalOpen = ref<boolean>(false);
+  const contactCalendarColor = ref<string>(
+    localStorage.getItem(CONTACT_CAL_COLOR_STORAGE_KEY) || DEFAULT_CONTACT_CALENDAR_COLOR
+  );
 
   const writableAddressBooks = computed(() =>
     addressBooks.value.filter((b) => !b.readOnly)
@@ -58,6 +65,19 @@ export const useContactsStore = defineStore('contacts', () => {
 
   const contactsWithBirthdaysCount = computed<number>(
     () => contacts.value.filter((c) => Boolean(c.birthday && /^\d{4}-\d{2}-\d{2}/.test(c.birthday))).length
+  );
+
+  const contactsWithAnniversariesCount = computed<number>(
+    () => contacts.value.filter((c) => Boolean(c.anniversary && /^\d{4}-\d{2}-\d{2}/.test(c.anniversary))).length
+  );
+
+  const contactsWithSpecialDatesCount = computed<number>(
+    () =>
+      contacts.value.filter(
+        (c) =>
+          Boolean(c.birthday && /^\d{4}-\d{2}-\d{2}/.test(c.birthday)) ||
+          Boolean(c.anniversary && /^\d{4}-\d{2}-\d{2}/.test(c.anniversary))
+      ).length
   );
 
   const favoritesCount = computed<number>(
@@ -144,6 +164,13 @@ export const useContactsStore = defineStore('contacts', () => {
       addressBooks.value = plainBooks;
       contacts.value = plainContacts;
       lastSyncedAt.value = res.syncedAt;
+      if (res.calendarColor && /^#[0-9a-fA-F]{6}$/.test(res.calendarColor)) {
+        contactCalendarColor.value = res.calendarColor.toLowerCase();
+        localStorage.setItem(CONTACT_CAL_COLOR_STORAGE_KEY, contactCalendarColor.value);
+      } else if (res.calendarColor === null) {
+        contactCalendarColor.value = DEFAULT_CONTACT_CALENDAR_COLOR;
+        localStorage.removeItem(CONTACT_CAL_COLOR_STORAGE_KEY);
+      }
 
       await db.transaction('rw', db.addressBooks, db.contacts, async () => {
         await db.addressBooks.clear();
@@ -209,6 +236,8 @@ export const useContactsStore = defineStore('contacts', () => {
         : [{ type: 'home', value: '', pref: true }],
       phones: [{ type: 'mobile', value: '', pref: true }],
       birthday: '',
+      anniversary: '',
+      anniversaryLabel: 'Bryllupsdag',
       address: { street: '', city: '', postalCode: '', country: '' },
       website: '',
       notes: '',
@@ -224,6 +253,8 @@ export const useContactsStore = defineStore('contacts', () => {
       ...contact,
       emails: contact.emails.length > 0 ? contact.emails : [{ type: 'home', value: '' }],
       phones: contact.phones.length > 0 ? contact.phones : [{ type: 'mobile', value: '' }],
+      anniversary: contact.anniversary || '',
+      anniversaryLabel: contact.anniversaryLabel || 'Bryllupsdag',
       address: contact.address || { street: '', city: '', postalCode: '', country: '' },
       categories: contact.categories || [],
       starred: Boolean(contact.starred)
@@ -329,6 +360,29 @@ export const useContactsStore = defineStore('contacts', () => {
       ...toPlainObject(contact),
       photoDataUrl
     });
+  }
+
+  async function setContactCalendarColor(newColor: string | null): Promise<void> {
+    const clean =
+      typeof newColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(newColor.trim())
+        ? newColor.trim().toLowerCase()
+        : null;
+
+    if (clean) {
+      contactCalendarColor.value = clean;
+      localStorage.setItem(CONTACT_CAL_COLOR_STORAGE_KEY, clean);
+    } else {
+      contactCalendarColor.value = DEFAULT_CONTACT_CALENDAR_COLOR;
+      localStorage.removeItem(CONTACT_CAL_COLOR_STORAGE_KEY);
+    }
+
+    if (suiteStore.isAuthenticated && !suiteStore.isPublicShareMode && suiteStore.isOnline) {
+      try {
+        await apiSaveContactCalendarColor(clean);
+      } catch {
+        // Bevares lokalt ved midlertidig netværksfejl
+      }
+    }
   }
 
   async function deleteContact(contact: Contact): Promise<boolean> {
@@ -474,6 +528,9 @@ export const useContactsStore = defineStore('contacts', () => {
     defaultWritableAddressBook,
     allCategories,
     contactsWithBirthdaysCount,
+    contactsWithAnniversariesCount,
+    contactsWithSpecialDatesCount,
+    contactCalendarColor,
     favoritesCount,
     filteredContacts,
     selectedContact,
@@ -486,6 +543,7 @@ export const useContactsStore = defineStore('contacts', () => {
     saveContact,
     toggleFavorite,
     updateContactPhotoQuick,
+    setContactCalendarColor,
     deleteContact,
     importVcfFile,
     exportContactsVcf,

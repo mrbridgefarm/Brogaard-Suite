@@ -4,6 +4,7 @@ export interface CardDavSyncResponse {
   ok: boolean;
   addressBooks: AddressBook[];
   contacts: Contact[];
+  calendarColor?: string | null;
   syncedAt: string;
   error?: string;
 }
@@ -101,4 +102,20 @@ export async function apiExportVcf(contacts: Contact[]): Promise<string> {
     throw new Error(data.error || 'Kunne ikke eksportere kontakter.');
   }
   return data.vcfContent as string;
+}
+
+export async function apiSaveContactCalendarColor(
+  calendarColor: string | null
+): Promise<string | null> {
+  const res = await fetch('/api/carddav/prefs', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ calendarColor })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke gemme farvevalg.');
+  }
+  return (data.calendarColor as string | null) ?? null;
 }

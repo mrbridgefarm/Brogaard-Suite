@@ -20,6 +20,8 @@ const title = ref('');
 const emails = ref<ContactEmail[]>([]);
 const phones = ref<ContactPhone[]>([]);
 const birthday = ref('');
+const anniversary = ref('');
+const anniversaryLabel = ref('Bryllupsdag');
 const street = ref('');
 const postalCode = ref('');
 const city = ref('');
@@ -78,6 +80,8 @@ watch(
         ? c.phones.map((p) => ({ ...p }))
         : [{ type: 'mobile', value: '', pref: true }];
     birthday.value = c.birthday || '';
+    anniversary.value = c.anniversary || '';
+    anniversaryLabel.value = c.anniversaryLabel || 'Bryllupsdag';
     street.value = c.address?.street || '';
     postalCode.value = c.address?.postalCode || '';
     city.value = c.address?.city || '';
@@ -177,6 +181,10 @@ async function handleSubmit() {
     emails: emails.value.filter((e) => e.value.trim().length > 0),
     phones: phones.value.filter((p) => p.value.trim().length > 0),
     birthday: birthday.value.trim() || undefined,
+    anniversary: anniversary.value.trim() || undefined,
+    anniversaryLabel: anniversary.value.trim()
+      ? anniversaryLabel.value.trim() || 'Bryllupsdag'
+      : undefined,
     address:
       street.value.trim() || city.value.trim() || postalCode.value.trim() || country.value.trim()
         ? {
@@ -476,8 +484,8 @@ async function handleSubmit() {
             </div>
           </div>
 
-          <!-- Fødselsdag, Hjemmeside & Grupper -->
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <!-- Fødselsdag & Mærkedag (Bryllupsdag m.v.) -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-slate-400 font-medium mb-1">Fødselsdag (vises i kalender)</label>
               <input
@@ -486,6 +494,28 @@ async function handleSubmit() {
                 class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
               />
             </div>
+            <div>
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <label class="text-slate-400 font-medium">Mærkedag (vises i kalender)</label>
+                <input
+                  v-model="anniversaryLabel"
+                  type="text"
+                  maxlength="40"
+                  placeholder="Bryllupsdag"
+                  title="Navn på mærkedag (f.eks. Bryllupsdag, Årsdag, Jubilæum)"
+                  class="w-32 px-2 py-0.5 text-[11px] bg-slate-950 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 text-right"
+                />
+              </div>
+              <input
+                v-model="anniversary"
+                type="date"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+              />
+            </div>
+          </div>
+
+          <!-- Grupper / Tags & Hjemmeside -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-slate-400 font-medium mb-1">Grupper / Tags (komma)</label>
               <input

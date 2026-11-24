@@ -201,12 +201,18 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   function getCalendarById(calId: string): CalendarSource | undefined {
     if (calId === BIRTHDAY_CALENDAR_ID) {
+      const defaultColor = '#ec4899';
+      const customColor = contactsStore.contactCalendarColor || defaultColor;
       return {
         id: BIRTHDAY_CALENDAR_ID,
         url: 'builtin://contact-birthdays',
-        name: 'Fødselsdage (Kontakter)',
-        color: '#ec4899',
-        serverColor: '#ec4899',
+        name:
+          contactsStore.contactsWithAnniversariesCount > 0
+            ? 'Fødselsdage & Mærkedage (Kontakter)'
+            : 'Fødselsdage (Kontakter)',
+        color: customColor,
+        serverColor: defaultColor,
+        localColorOverride: customColor !== defaultColor ? customColor : null,
         readOnly: true,
         isShared: false,
         isSubscribed: true,
@@ -260,43 +266,79 @@ export const useCalendarStore = defineStore('calendar', () => {
     return pickDefaultTargetCalendar();
   });
 
-  // Virtuelle fødselsdage fra CardDAV Kontakter
+  // Virtuelle fødselsdage og mærkedage (f.eks. bryllupsdage) fra CardDAV Kontakter
   const birthdayEvents = computed<CalendarEvent[]>(() => {
     if (isPublicShareMode.value || !showContactBirthdays.value) return [];
     const currentYear = new Date().getFullYear();
+    const selectedYear = Number(selectedDateStr.value?.slice(0, 4)) || currentYear;
+    const yearsSet = new Set<number>();
+    for (let y = currentYear - 1; y <= currentYear + 1; y++) yearsSet.add(y);
+    for (let y = selectedYear - 1; y <= selectedYear + 1; y++) yearsSet.add(y);
+    const years = Array.from(yearsSet).sort((a, b) => a - b);
+
     const result: CalendarEvent[] = [];
 
-    for (const contact of contactsStore.contacts) {
-      if (!contact.birthday) continue;
-      const match = contact.birthday.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (!match) continue;
-      const birthYear = Number(match[1]);
+    const appendRecurringSpecialDate = (
+      contactUid: string,
+      contactName: string,
+      rawDate: string | undefined,
+      kindKey: 'birthday' | 'anniversary',
+      icon: string,
+      customLabel?: string
+    ) => {
+      if (!rawDate) return;
+      const match = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!match) return;
+      const originYear = Number(match[1]);
       const month = Number(match[2]);
       const day = Number(match[3]);
-      if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+      if (month < 1 || month > 12 || day < 1 || day > 31) return;
 
-      for (let y = currentYear - 1; y <= currentYear + 1; y++) {
+      for (const y of years) {
         const effDay = month === 2 && day === 29 && !isLeapYear(y) ? 28 : day;
         const startYmd = `${y}-${String(month).padStart(2, '0')}-${String(effDay).padStart(2, '0')}`;
         const endYmd = addDaysToDateOnly(startYmd, 1);
-        const age = y - birthYear;
-        const ageLabel = birthYear >= 1900 && age >= 0 && age <= 130 ? ` (${age} år)` : '';
+        const diffYears = y - originYear;
+        const yearsSuffix =
+          originYear >= 1900 && diffYears >= 0 && diffYears <= 130 ? ` (${diffYears} år)` : '';
+
+        const title =
+          kindKey === 'birthday'
+            ? `${icon} ${contactName}${yearsSuffix}`
+            : `${icon} ${contactName} – ${customLabel || 'Bryllupsdag'}${yearsSuffix}`;
+
+        const description =
+          kindKey === 'birthday'
+            ? `Fødselsdag for ${contactName} (fra Brogaard Kontakter)`
+            : `${customLabel || 'Bryllupsdag'} for ${contactName} (fra Brogaard Kontakter)`;
 
         result.push({
-          id: `${BIRTHDAY_CALENDAR_ID}::${contact.uid}::${y}`,
-          uid: `birthday-${contact.uid}-${y}`,
+          id: `${BIRTHDAY_CALENDAR_ID}::${kindKey}::${contactUid}::${y}`,
+          uid: `${kindKey}-${contactUid}-${y}`,
           calendarId: BIRTHDAY_CALENDAR_ID,
-          title: `🎂 ${contact.fullName}${ageLabel}`,
+          title,
           start: startYmd,
           end: endYmd,
           allDay: true,
-          description: `Fødselsdag for ${contact.fullName} (fra Brogaard Kontakter)`,
+          description,
           location: '',
           timezone: 'Europe/Copenhagen',
           attendees: [],
           reminderMinutes: null
         });
       }
+    };
+
+    for (const contact of contactsStore.contacts) {
+      appendRecurringSpecialDate(contact.uid, contact.fullName, contact.birthday, 'birthday', '🎂');
+      appendRecurringSpecialDate(
+        contact.uid,
+        contact.fullName,
+        contact.anniversary,
+        'anniversary',
+        '💍',
+        contact.anniversaryLabel || 'Bryllupsdag'
+      );
     }
 
     return result;
@@ -1150,8 +1192,12 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   async function setCalendarColorOverride(calId: string, newColor: string | null) {
+    if (calId === BIRTHDAY_CALENDAR_ID) {
+      await contactsStore.setContactCalendarColor(newColor);
+      return;
+    }
     const cal = getCalendarById(calId);
-    if (!cal || calId === BIRTHDAY_CALENDAR_ID) return;
+    if (!cal) return;
     const overrides = getColorOverrides();
     if (newColor) {
       overrides[calId] = newColor;

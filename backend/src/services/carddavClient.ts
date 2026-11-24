@@ -56,6 +56,8 @@ export interface ContactDTO {
   emails: ContactEmailDTO[];
   phones: ContactPhoneDTO[];
   birthday?: string;
+  anniversary?: string;
+  anniversaryLabel?: string;
   address?: ContactAddressDTO;
   website?: string;
   notes?: string;
@@ -504,6 +506,8 @@ export function parseVcardToContacts(
     let organization = '';
     let title = '';
     let birthday: string | undefined;
+    let anniversary: string | undefined;
+    let anniversaryLabel: string | undefined;
     let address: ContactAddressDTO | undefined;
     let website: string | undefined;
     let notes = '';
@@ -591,6 +595,18 @@ export function parseVcardToContacts(
         case 'BDAY':
           birthday = normalizeBirthday(valuePart);
           break;
+        case 'ANNIVERSARY':
+        case 'X-ANNIVERSARY':
+        case 'X-SPOUSE-ANNIVERSARY': {
+          const parsedAnniv = normalizeBirthday(valuePart);
+          if (parsedAnniv) anniversary = parsedAnniv;
+          break;
+        }
+        case 'X-ANNIVERSARY-LABEL': {
+          const lbl = unescapeVcardText(valuePart).trim().slice(0, 40);
+          if (lbl) anniversaryLabel = lbl;
+          break;
+        }
         case 'ADR': {
           const adrParts = splitEscapedVcardFields(valuePart, ';').map((p) =>
             unescapeVcardText(p).trim()
@@ -692,6 +708,8 @@ export function parseVcardToContacts(
       emails,
       phones,
       birthday,
+      anniversary,
+      anniversaryLabel: anniversary ? anniversaryLabel || 'Bryllupsdag' : undefined,
       address,
       website,
       notes: notes || undefined,
@@ -767,6 +785,16 @@ export function buildVcardFromContact(contact: ContactDTO): string {
 
   if (contact.birthday && /^\d{4}-\d{2}-\d{2}$/.test(contact.birthday.trim())) {
     lines.push(`BDAY:${contact.birthday.trim()}`);
+  }
+
+  if (contact.anniversary && /^\d{4}-\d{2}-\d{2}$/.test(contact.anniversary.trim())) {
+    const cleanAnniv = contact.anniversary.trim();
+    lines.push(`ANNIVERSARY:${cleanAnniv}`);
+    lines.push(`X-ANNIVERSARY:${cleanAnniv}`);
+    const cleanLabel = (contact.anniversaryLabel || 'Bryllupsdag').trim().slice(0, 40);
+    if (cleanLabel) {
+      lines.push(`X-ANNIVERSARY-LABEL:${escapeVcardText(cleanLabel)}`);
+    }
   }
 
   if (
