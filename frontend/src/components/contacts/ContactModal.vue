@@ -4,6 +4,7 @@ import { X, Users, Plus, Trash2, Save, Star, Camera, ImagePlus } from 'lucide-vu
 import { useContactsStore } from '../../stores/contactsStore';
 import { useSuiteStore } from '../../stores/suiteStore';
 import { processContactPhotoFile } from '../../utils/contactPhoto';
+import { getGravatarAvatarUrlForEmail, markGravatarFailed } from '../../utils/gravatar';
 import type { ContactEmail, ContactPhone } from '../../types/contacts';
 
 const store = useContactsStore();
@@ -45,6 +46,17 @@ const previewInitials = computed(() => {
   }
   return composed.slice(0, 2).toUpperCase();
 });
+
+const autoGravatarUrl = computed(() => {
+  if (photoDataUrl.value) return null;
+  for (const em of emails.value) {
+    const url = getGravatarAvatarUrlForEmail(em.value, 160);
+    if (url) return url;
+  }
+  return null;
+});
+
+const effectivePreviewSrc = computed(() => photoDataUrl.value || autoGravatarUrl.value || null);
 
 watch(
   () => store.editingContact,
@@ -228,10 +240,12 @@ async function handleSubmit() {
                 title="Klik eller træk et billede hertil"
               >
                 <img
-                  v-if="photoDataUrl"
-                  :src="photoDataUrl"
+                  v-if="effectivePreviewSrc"
+                  :src="effectivePreviewSrc"
                   alt="Kontaktbillede"
+                  referrerpolicy="no-referrer"
                   class="w-full h-full object-cover"
+                  @error="markGravatarFailed(effectivePreviewSrc)"
                 />
                 <span v-else>{{ previewInitials }}</span>
                 <span
@@ -273,7 +287,11 @@ async function handleSubmit() {
                   </button>
                 </div>
                 <p class="text-[10.5px] text-slate-500">
-                  Beskæres automatisk kvadratisk og synkroniseres til CardDAV.
+                  {{
+                    photoDataUrl
+                      ? 'Eget billede valgt — synkroniseres til CardDAV.'
+                      : 'Henter automatisk offentligt profilbillede (hvis tilgængeligt), indtil du vælger eget.'
+                  }}
                 </p>
               </div>
             </div>

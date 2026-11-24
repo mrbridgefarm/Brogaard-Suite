@@ -8,7 +8,8 @@ import {
   saveCardDavContact,
   deleteCardDavContact,
   parseVcardToContacts,
-  buildVcardFromContact
+  buildVcardFromContact,
+  fetchExternalContactPhotoAsDataUrl
 } from '../services/carddavClient.js';
 import { normalizeDanishText } from '../services/icalMapper.js';
 import { requireDavCredentials } from '../services/sessionAuth.js';
@@ -222,15 +223,39 @@ carddavRouter.post('/import', async (req: Request, res: Response) => {
       return;
     }
 
+    // Hent evt. eksterne HTTPS PHOTO-links (f.eks. fra Google Kontakter .vcf-eksport) i små batches
+    const PHOTO_BATCH_SIZE = 5;
+    for (let i = 0; i < parsed.length; i += PHOTO_BATCH_SIZE) {
+      const slice = parsed.slice(i, i + PHOTO_BATCH_SIZE);
+      await Promise.all(
+        slice.map(async (c) => {
+          if (!c.photoDataUrl && c.externalPhotoUrl) {
+            const downloaded = await fetchExternalContactPhotoAsDataUrl(c.externalPhotoUrl);
+            if (downloaded) {
+              c.photoDataUrl = downloaded;
+            }
+          }
+        })
+      );
+    }
+
     const savedContacts: ContactDTO[] = [];
     for (const c of parsed) {
       const saved = await saveCardDavContact(creds, {
         ...c,
+        externalPhotoUrl: undefined,
         addressBookId,
         uid: crypto.randomUUID(),
         vcardUrl: undefined,
         etag: undefined
       });
+      if (c.starred) {
+        setUserContactFavorite(creds.username, saved.id, true);
+        if (saved.uid) {
+          setUserContactFavorite(creds.username, saved.uid, true);
+        }
+        saved.starred = true;
+      }
       savedContacts.push(saved);
     }
 

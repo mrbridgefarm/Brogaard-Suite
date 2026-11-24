@@ -24,6 +24,7 @@ import { useContactsStore } from '../../stores/contactsStore';
 import { useSuiteStore } from '../../stores/suiteStore';
 import { useTheme } from '../../composables/useTheme';
 import { processContactPhotoFile } from '../../utils/contactPhoto';
+import { resolveContactAvatarSrc, markGravatarFailed } from '../../utils/gravatar';
 import type { Contact } from '../../types/contacts';
 
 const SIDEBAR_WIDTH_KEY = 'brogaard_contacts_sidebar_width_v1';
@@ -483,13 +484,16 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
           >
             <div
               class="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-xs font-bold text-white overflow-hidden shadow-sm border border-white/15"
-              :style="!contact.photoDataUrl ? { backgroundColor: getAvatarColor(contact.fullName) } : undefined"
+              :style="!resolveContactAvatarSrc(contact, 80) ? { backgroundColor: getAvatarColor(contact.fullName) } : undefined"
             >
               <img
-                v-if="contact.photoDataUrl"
-                :src="contact.photoDataUrl"
+                v-if="resolveContactAvatarSrc(contact, 80)"
+                :src="resolveContactAvatarSrc(contact, 80) || undefined"
                 :alt="contact.fullName"
+                referrerpolicy="no-referrer"
+                loading="lazy"
                 class="w-full h-full object-cover"
+                @error="markGravatarFailed(resolveContactAvatarSrc(contact, 80))"
               />
               <span v-else>{{ getInitials(contact) }}</span>
             </div>
@@ -581,14 +585,16 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
               <label
                 v-if="!store.isAddressBookReadOnly(store.selectedContact.addressBookId)"
                 class="group relative w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center text-xl font-bold text-white overflow-hidden shadow-lg border border-white/20 cursor-pointer"
-                :style="!store.selectedContact.photoDataUrl ? { backgroundColor: getAvatarColor(store.selectedContact.fullName) } : undefined"
+                :style="!resolveContactAvatarSrc(store.selectedContact, 160) ? { backgroundColor: getAvatarColor(store.selectedContact.fullName) } : undefined"
                 title="Klik for at uploade eller skifte kontaktbillede"
               >
                 <img
-                  v-if="store.selectedContact.photoDataUrl"
-                  :src="store.selectedContact.photoDataUrl"
+                  v-if="resolveContactAvatarSrc(store.selectedContact, 160)"
+                  :src="resolveContactAvatarSrc(store.selectedContact, 160) || undefined"
                   :alt="store.selectedContact.fullName"
+                  referrerpolicy="no-referrer"
                   class="w-full h-full object-cover"
+                  @error="markGravatarFailed(resolveContactAvatarSrc(store.selectedContact, 160))"
                 />
                 <span v-else>{{ getInitials(store.selectedContact) }}</span>
                 <span
@@ -606,13 +612,15 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
               <div
                 v-else
                 class="w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center text-xl font-bold text-white overflow-hidden shadow-lg border border-white/20"
-                :style="!store.selectedContact.photoDataUrl ? { backgroundColor: getAvatarColor(store.selectedContact.fullName) } : undefined"
+                :style="!resolveContactAvatarSrc(store.selectedContact, 160) ? { backgroundColor: getAvatarColor(store.selectedContact.fullName) } : undefined"
               >
                 <img
-                  v-if="store.selectedContact.photoDataUrl"
-                  :src="store.selectedContact.photoDataUrl"
+                  v-if="resolveContactAvatarSrc(store.selectedContact, 160)"
+                  :src="resolveContactAvatarSrc(store.selectedContact, 160) || undefined"
                   :alt="store.selectedContact.fullName"
+                  referrerpolicy="no-referrer"
                   class="w-full h-full object-cover"
+                  @error="markGravatarFailed(resolveContactAvatarSrc(store.selectedContact, 160))"
                 />
                 <span v-else>{{ getInitials(store.selectedContact) }}</span>
               </div>

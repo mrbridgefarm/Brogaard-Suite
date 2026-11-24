@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import { createDAVClient } from 'tsdav';
 import {
   type CalDavCredentials,
@@ -60,6 +62,7 @@ export interface ContactDTO {
   categories: string[];
   starred?: boolean;
   photoDataUrl?: string | null;
+  externalPhotoUrl?: string;
   vcardUrl?: string;
   etag?: string;
   rawVcard?: string;
@@ -509,6 +512,7 @@ export function parseVcardToContacts(
     const emails: ContactEmailDTO[] = [];
     const phones: ContactPhoneDTO[] = [];
     let photoDataUrl: string | undefined;
+    let externalPhotoUrl: string | undefined;
 
     for (const rawLine of lines) {
       const line = rawLine.trim();
@@ -633,6 +637,8 @@ export function parseVcardToContacts(
           const trimmedVal = valuePart.trim();
           if (/^data:image\//i.test(trimmedVal) && trimmedVal.length < 1_000_000) {
             photoDataUrl = trimmedVal;
+          } else if (/^https:\/\/\S+/i.test(trimmedVal) && trimmedVal.length < 2048) {
+            externalPhotoUrl = trimmedVal;
           } else if (
             trimmedVal &&
             !/^https?:\/\//i.test(trimmedVal) &&
@@ -692,6 +698,7 @@ export function parseVcardToContacts(
       categories,
       starred,
       photoDataUrl,
+      externalPhotoUrl,
       vcardUrl,
       etag,
       rawVcard: block
@@ -969,6 +976,116 @@ export async function saveCardDavContact(
     rawVcard: vcardString,
     updatedAt: new Date().toISOString()
   };
+}
+
+function isPrivateOrReservedIp(ip: string): boolean {
+  const clean = ip.trim().replace(/^::ffff:/i, '').toLowerCase();
+  if (net.isIPv4(clean)) {
+    const parts = clean.split('.').map(Number);
+    if (parts[0] === 0 || parts[0] === 10 || parts[0] === 127) return true;
+    if (parts[0] === 169 && parts[1] === 254) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
+    if (parts[0] >= 224) return true;
+    return false;
+  }
+  if (net.isIPv6(clean)) {
+    if (
+      clean === '::' ||
+      clean === '::1' ||
+      clean.startsWith('fc') ||
+      clean.startsWith('fd') ||
+      clean.startsWith('fe8') ||
+      clean.startsWith('fe9') ||
+      clean.startsWith('fea') ||
+      clean.startsWith('feb')
+    ) {
+      return true;
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Henter et eksternt HTTPS kontaktbillede (f.eks. fra Google Kontakter .vcf-eksport) sikkert med SSRF-beskyttelse
+ * og returnerer det som data:image/...;base64 til lagring i CardDAV.
+ */
+export async function fetchExternalContactPhotoAsDataUrl(
+  rawUrl: string,
+  maxBytes = 512 * 1024
+): Promise<string | undefined> {
+  try {
+    const urlObj = new URL(rawUrl.trim());
+    if (urlObj.protocol !== 'https:') return undefined;
+
+    const host = urlObj.hostname.toLowerCase();
+    if (
+      !host ||
+      host === 'localhost' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal')
+    ) {
+      return undefined;
+    }
+
+    if (net.isIP(host) !== 0) {
+      if (isPrivateOrReservedIp(host)) return undefined;
+    } else {
+      const resolved = await dns.lookup(host, { all: true });
+      if (!resolved.length || resolved.some((r) => isPrivateOrReservedIp(r.address))) {
+        return undefined;
+      }
+    }
+
+    const res = await fetch(urlObj.toString(), {
+      method: 'GET',
+      redirect: 'follow',
+      headers: {
+        Accept: 'image/jpeg,image/png,image/webp,image/gif;q=0.9,*/*;q=0.1'
+      },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!res.ok) return undefined;
+
+    const finalHost = new URL(res.url || urlObj.toString()).hostname.toLowerCase();
+    if (finalHost !== host) {
+      if (net.isIP(finalHost) !== 0) {
+        if (isPrivateOrReservedIp(finalHost)) return undefined;
+      } else {
+        const resolvedFinal = await dns.lookup(finalHost, { all: true });
+        if (!resolvedFinal.length || resolvedFinal.some((r) => isPrivateOrReservedIp(r.address))) {
+          return undefined;
+        }
+      }
+    }
+
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    const mime = ct.includes('image/png')
+      ? 'image/png'
+      : ct.includes('image/webp')
+        ? 'image/webp'
+        : ct.includes('image/gif')
+          ? 'image/gif'
+          : ct.includes('image/jpeg') || ct.includes('image/jpg')
+            ? 'image/jpeg'
+            : '';
+    if (!mime) return undefined;
+
+    const contentLen = Number(res.headers.get('content-length') || 0);
+    if (contentLen > maxBytes) return undefined;
+
+    const arrayBuf = await res.arrayBuffer();
+    if (arrayBuf.byteLength === 0 || arrayBuf.byteLength > maxBytes) {
+      return undefined;
+    }
+
+    const b64 = Buffer.from(arrayBuf).toString('base64');
+    return `data:${mime};base64,${b64}`;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
