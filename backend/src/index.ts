@@ -20,9 +20,18 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
-// Skjul Express server-fingeraftryk og stol på første reverse proxy (Pangolin / Traefik / Nginx)
+// Skjul Express server-fingeraftryk og stol på reverse proxy (Pangolin / Traefik / Nginx) for ægte klient-IP
 app.disable('x-powered-by');
-app.set('trust proxy', 1);
+const rawTrustProxy = (process.env.TRUST_PROXY || '').trim().toLowerCase();
+const trustProxySetting: boolean | number =
+  rawTrustProxy === 'false' || rawTrustProxy === '0'
+    ? false
+    : rawTrustProxy === 'true'
+      ? true
+      : /^\d+$/.test(rawTrustProxy)
+        ? Number(rawTrustProxy)
+        : 2;
+app.set('trust proxy', trustProxySetting);
 
 // Sikkerhedsheaders på alle HTTP-svar (OWASP best practices)
 app.use((_req, res, next) => {

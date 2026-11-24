@@ -12,6 +12,7 @@ export interface MailServerCredentials {
   smtpSecure: boolean;
   username: string;
   password: string;
+  clientIp?: string;
 }
 
 export interface MailFolderDTO {
@@ -201,6 +202,13 @@ function createImapClient(creds: MailServerCredentials): ImapFlow {
       user: creds.username,
       pass: creds.password
     },
+    clientInfo: {
+      name: 'Brogaard Suite',
+      version: '1.0',
+      ...(creds.clientIp && net.isIP(creds.clientIp) !== 0
+        ? { 'x-originating-ip': creds.clientIp }
+        : {})
+    } as any,
     logger: false,
     tls: {
       rejectUnauthorized: !allowInsecure

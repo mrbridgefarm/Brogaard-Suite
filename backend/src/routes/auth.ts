@@ -1,12 +1,20 @@
 import { Router, type Request, type Response } from 'express';
 import { fetchMailFolders } from '../services/mailClient.js';
-import { fetchCalendars, normalizeMailcowUrl, type CalendarInfoDTO } from '../services/davClient.js';
+import {
+  fetchCalendars,
+  verifyAndFetchSharedCalendar,
+  canonicalSogoCalendarSignature,
+  normalizeMailcowUrl,
+  type CalendarInfoDTO
+} from '../services/davClient.js';
 import { getAliasesForUser } from '../services/aliasStore.js';
 import { resolveAliasesWithMailcow } from '../services/mailcowAliases.js';
 import { refreshPublicShareOwnerPassword } from '../services/shareStore.js';
 import {
   refreshUserShareOwnerPassword,
-  resolveIncomingSharesForRecipient
+  resolveIncomingSharesForRecipient,
+  resolveIncomingSogoHintsForRecipient,
+  removeUserCalendarShareByTarget
 } from '../services/userShareStore.js';
 import {
   getCalendarNameOverrides,
@@ -15,6 +23,7 @@ import {
 } from '../services/calendarPrefsStore.js';
 import {
   createRateLimiter,
+  extractClientIp,
   getSessionFromCookie,
   setSessionCookie,
   clearSessionCookie,
@@ -65,7 +74,8 @@ authRouter.get('/session', async (req: Request, res: Response) => {
       {
         serverUrl: davUrl,
         username: session.username,
-        password: session.password
+        password: session.password,
+        clientIp: extractClientIp(req)
       },
       false
     );
@@ -88,6 +98,7 @@ authRouter.get('/session', async (req: Request, res: Response) => {
  * og sætter én samlet AES-256-GCM HttpOnly SSO-cookie på /api.
  */
 authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
+  const clientIp = extractClientIp(req);
   try {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '');
@@ -116,7 +127,8 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
       smtpPort: serverCfg.smtpPort,
       smtpSecure: serverCfg.smtpSecure,
       username,
-      password
+      password,
+      clientIp
     };
 
     // Primær autentificering mod IMAP
@@ -139,7 +151,8 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
     const davCreds = {
       serverUrl: serverCfg.caldavUrl,
       username,
-      password
+      password,
+      clientIp
     };
 
     let aliases = getAliasesForUser(username);
@@ -165,11 +178,12 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
     ]);
 
     const activeIncomingNorms = new Set<string>();
+    const identityEmails = Array.from(
+      new Set([username, ...aliases.map((a) => a.email)].map((e) => e.toLowerCase().trim()).filter(Boolean))
+    );
+
     try {
-      const incoming = resolveIncomingSharesForRecipient([
-        username,
-        ...aliases.map((a) => a.email)
-      ]);
+      const incoming = resolveIncomingSharesForRecipient(identityEmails);
       const existingNorms = new Set(
         calendars.map((c) => decodeURIComponent(c.url || '').toLowerCase().replace(/\/+$/, ''))
       );
@@ -208,15 +222,77 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
       // Ignorér hvis incoming share opslag fejler ved login
     }
 
+    let dismissedSharedCount = 0;
     try {
-      calendars = calendars.filter(
-        (c) =>
-          !c.isShared ||
-          activeIncomingNorms.has(decodeURIComponent(c.url || '').toLowerCase().replace(/\/+$/, '')) ||
-          !isSharedCalendarDismissed(username, c.id, c.url)
-      );
+      calendars = calendars.filter((c) => {
+        if (!c.isShared) return true;
+        const normUrl = decodeURIComponent(c.url || '').toLowerCase().replace(/\/+$/, '');
+        if (activeIncomingNorms.has(normUrl)) return true;
+        if (isSharedCalendarDismissed(username, c.id, c.url)) {
+          dismissedSharedCount += 1;
+          return false;
+        }
+        return true;
+      });
     } catch {
       // Ignorér filtreringsfejl
+    }
+
+    try {
+      const sogoHints = resolveIncomingSogoHintsForRecipient(identityEmails);
+      if (sogoHints.length > 0) {
+        const presentNorms = new Set(
+          calendars.map((c) => decodeURIComponent(c.url || '').toLowerCase().replace(/\/+$/, ''))
+        );
+        const presentSigs = new Set(
+          calendars
+            .map((c) => canonicalSogoCalendarSignature(c.url, c.owner))
+            .filter((s): s is string => Boolean(s))
+        );
+        const hintsToVerify = sogoHints.filter((hint) => {
+          const normHint = decodeURIComponent(hint.calendarUrl).toLowerCase().replace(/\/+$/, '');
+          const sigHint = canonicalSogoCalendarSignature(hint.calendarUrl, hint.ownerUsername);
+          if (presentNorms.has(normHint) || (sigHint && presentSigs.has(sigHint))) {
+            return false;
+          }
+          if (isSharedCalendarDismissed(username, hint.calendarUrl, hint.calendarUrl)) {
+            dismissedSharedCount += 1;
+            return false;
+          }
+          return true;
+        });
+
+        if (hintsToVerify.length > 0) {
+          const verified = await Promise.allSettled(
+            hintsToVerify.map(async (hint) => {
+              try {
+                return await verifyAndFetchSharedCalendar(
+                  davCreds,
+                  hint.calendarUrl,
+                  hint.calendarName,
+                  hint.calendarColor
+                );
+              } catch (err: any) {
+                if (/HTTP (?:401|403|404)\b/.test(String(err?.message || err))) {
+                  removeUserCalendarShareByTarget(
+                    hint.ownerUsername,
+                    hint.calendarUrl,
+                    hint.recipientEmail
+                  );
+                }
+                return null;
+              }
+            })
+          );
+          for (const vr of verified) {
+            if (vr.status === 'fulfilled' && vr.value) {
+              calendars.push(vr.value);
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignorér hvis SOGo-hint opslag fejler ved login
     }
 
     let nameOverrides: Record<string, string> = {};
@@ -246,10 +322,14 @@ authRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
       aliases,
       calendars,
       nameOverrides,
+      dismissedSharedCount,
       caldavReady
     });
   } catch (err: any) {
-    console.error('Suite login fejl:', err?.message || err);
+    console.warn(
+      `[Auth] Suite login fejl for ${String(req.body?.username || '').trim() || 'ukendt'} fra IP ${clientIp || 'ukendt'}:`,
+      err?.message || err
+    );
     res.status(401).json({
       ok: false,
       error: err?.message || 'Kunne ikke logge ind på Mailcow. Kontrollér e-mail og adgangskode.'

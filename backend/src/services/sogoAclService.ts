@@ -7,7 +7,8 @@ import {
   davRequest,
   readResponseTextSmart,
   escapeXml,
-  decodeSogoSharedSlugOwner
+  decodeSogoSharedSlugOwner,
+  buildForwardedIpHeaders
 } from './davClient.js';
 import { type CalendarSharePermission } from './userShareStore.js';
 
@@ -249,7 +250,8 @@ async function trySubscribeUserInSogo(
       method: 'GET',
       headers: {
         Authorization: `Basic ${auth}`,
-        Accept: 'application/json, text/plain, */*'
+        Accept: 'application/json, text/plain, */*',
+        ...buildForwardedIpHeaders(creds.clientIp)
       },
       redirect: 'manual',
       signal: AbortSignal.timeout(6000)
@@ -522,6 +524,29 @@ export async function revokeSogoCalendarShare(
   };
 }
 
+export async function subscribeToSogoSharedCalendar(
+  creds: CalDavCredentials,
+  calendarUrl: string
+): Promise<boolean> {
+  try {
+    const targetUrl = ensureTrailingSlash(calendarUrl.trim());
+    assertSameServerOrigin(targetUrl, creds);
+    const body =
+      '<?xml version="1.0" encoding="utf-8"?><subscribe xmlns="urn:inverse:params:xml:ns:inverse-dav"/>';
+    await davRequest(
+      creds,
+      'POST',
+      targetUrl,
+      body,
+      { 'Content-Type': 'application/xml; charset=utf-8' },
+      6000
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function unsubscribeFromSogoSharedCalendar(
   creds: CalDavCredentials,
   calendarUrl: string
@@ -566,7 +591,8 @@ export async function unsubscribeFromSogoSharedCalendar(
       const res = await fetch(soUnsubUrl, {
         method: 'GET',
         headers: {
-          Authorization: `Basic ${auth}`
+          Authorization: `Basic ${auth}`,
+          ...buildForwardedIpHeaders(creds.clientIp)
         },
         redirect: 'manual',
         signal: AbortSignal.timeout(6000)

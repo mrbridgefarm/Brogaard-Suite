@@ -16,6 +16,7 @@ export interface SuiteLoginResponse {
   aliases: SenderAlias[];
   calendars: Omit<CalendarSource, 'visible'>[];
   nameOverrides?: Record<string, string>;
+  dismissedSharedCount?: number;
   caldavReady: boolean;
   error?: string;
 }

@@ -5,7 +5,8 @@ import {
   normalizeMailcowUrl,
   ensureTrailingSlash,
   assertSameServerOrigin,
-  readResponseTextSmart
+  readResponseTextSmart,
+  buildForwardedIpHeaders
 } from './davClient.js';
 import { normalizeDanishText, sanitizeHttpUrl } from './icalMapper.js';
 
@@ -101,6 +102,7 @@ async function carddavRequest(
     headers: {
       Authorization: `Basic ${auth}`,
       'Accept-Charset': 'utf-8, iso-8859-1;q=0.5',
+      ...buildForwardedIpHeaders(creds.clientIp),
       ...extraHeaders
     },
     body: body !== undefined ? Buffer.from(body, 'utf8') : undefined
@@ -268,6 +270,7 @@ export async function fetchAddressBooks(creds: CalDavCredentials): Promise<Addre
   if (discoveredByKey.size === 0) {
     try {
       const serverUrl = normalizeMailcowUrl(creds.serverUrl);
+      const ipHeaders = buildForwardedIpHeaders(creds.clientIp);
       const client = await createDAVClient({
         serverUrl,
         credentials: {
@@ -275,7 +278,8 @@ export async function fetchAddressBooks(creds: CalDavCredentials): Promise<Addre
           password: creds.password
         },
         authMethod: 'Basic',
-        defaultAccountType: 'carddav'
+        defaultAccountType: 'carddav',
+        ...(Object.keys(ipHeaders).length > 0 ? { fetchOptions: { headers: ipHeaders } } : {})
       });
 
       const davBooks = await client.fetchAddressBooks();

@@ -12,6 +12,7 @@ export interface SyncResponse {
   calendars: Omit<CalendarSource, 'visible'>[];
   events: CalendarEvent[];
   nameOverrides?: Record<string, string>;
+  dismissedSharedCount?: number;
   syncedAt: string;
   error?: string;
 }
@@ -271,6 +272,17 @@ export async function apiLeaveSharedCalendar(params: {
     removedOwners: Array.isArray(data.removedOwners) ? data.removedOwners : [],
     unsubscribedInSogo: Boolean(data.unsubscribedInSogo)
   };
+}
+
+export async function apiRestoreDismissedSharedCalendars(): Promise<void> {
+  const res = await fetch('/api/caldav/user-shares/restore-dismissed', {
+    method: 'POST',
+    credentials: 'include'
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke gendanne forladte delte kalendere.');
+  }
 }
 
 export async function apiSetCalendarName(params: {

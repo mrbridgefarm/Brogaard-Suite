@@ -25,6 +25,7 @@ export interface UserCalendarShareRecord {
   calendarColor: string;
   recipientEmail: string;
   permission: CalendarSharePermission;
+  mode?: 'sogo' | 'suite';
   createdAt: string;
   updatedAt: string;
 }
@@ -37,6 +38,7 @@ export interface UserCalendarSharePublicInfo {
   calendarColor: string;
   recipientEmail: string;
   permission: CalendarSharePermission;
+  mode?: 'sogo' | 'suite';
   createdAt: string;
   updatedAt: string;
 }
@@ -88,6 +90,7 @@ function toPublicInfo(rec: UserCalendarShareRecord): UserCalendarSharePublicInfo
     calendarColor: rec.calendarColor,
     recipientEmail: rec.recipientEmail,
     permission: rec.permission,
+    mode: rec.mode || 'suite',
     createdAt: rec.createdAt,
     updatedAt: rec.updatedAt
   };
@@ -143,7 +146,7 @@ export function isUrlInsideSharedCalendar(
 export function listOutgoingUserShares(ownerUsername: string): UserCalendarSharePublicInfo[] {
   const ownerLower = ownerUsername.toLowerCase().trim();
   return readAllUserShares()
-    .filter((r) => r.ownerUsername.toLowerCase().trim() === ownerLower)
+    .filter((r) => r.mode !== 'sogo' && r.ownerUsername.toLowerCase().trim() === ownerLower)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map(toPublicInfo);
 }
@@ -361,6 +364,9 @@ export function resolveIncomingSharesForRecipient(
   >();
 
   for (const rec of readAllUserShares()) {
+    if (rec.mode === 'sogo' || !rec.ownerEncryptedPassword) {
+      continue;
+    }
     const recRecipient = rec.recipientEmail.toLowerCase().trim();
     const recOwner = rec.ownerUsername.toLowerCase().trim();
     if (!recipientSet.has(recRecipient) || recipientSet.has(recOwner)) {
@@ -424,7 +430,7 @@ export function refreshUserShareOwnerPassword(
   let changed = false;
 
   const updated = all.map((r) => {
-    if (r.ownerUsername.toLowerCase().trim() === ownerLower) {
+    if (r.ownerUsername.toLowerCase().trim() === ownerLower && r.mode !== 'sogo') {
       changed = true;
       return {
         ...r,
@@ -438,4 +444,123 @@ export function refreshUserShareOwnerPassword(
   if (changed) {
     writeAllUserShares(updated);
   }
+}
+
+/**
+ * Gemmer/opdaterer en kodeordsfri opdagelseshint til modtager ved direkte SOGo-deling.
+ */
+export function upsertSogoShareHint(params: {
+  ownerUsername: string;
+  ownerServerUrl: string;
+  calendarUrl: string;
+  calendarName: string;
+  calendarColor?: string;
+  recipientEmail: string;
+  permission: CalendarSharePermission;
+}): void {
+  const ownerUsername = params.ownerUsername.trim();
+  const ownerLower = ownerUsername.toLowerCase();
+  const recipientEmail = params.recipientEmail.trim();
+  const recipientLower = recipientEmail.toLowerCase();
+  if (!ownerUsername || !recipientEmail) return;
+
+  const calendarUrl = ensureTrailingSlash(params.calendarUrl.trim());
+  const canonicalCal = canonicalizeUrl(calendarUrl);
+  const safeColor = /^#[0-9a-fA-F]{6}$/.test(params.calendarColor || '')
+    ? (params.calendarColor as string)
+    : '#2563eb';
+  const cleanName = params.calendarName.trim() || 'Delt kalender';
+  const permission: CalendarSharePermission = params.permission === 'write' ? 'write' : 'read';
+  const now = new Date().toISOString();
+
+  const all = readAllUserShares().filter(
+    (r) =>
+      !(
+        r.ownerUsername.toLowerCase().trim() === ownerLower &&
+        canonicalizeUrl(r.calendarUrl) === canonicalCal &&
+        r.recipientEmail.toLowerCase().trim() === recipientLower
+      )
+  );
+
+  all.push({
+    id: crypto.randomUUID(),
+    ownerUsername,
+    ownerServerUrl: params.ownerServerUrl,
+    ownerEncryptedPassword: '',
+    calendarUrl,
+    calendarName: cleanName,
+    calendarColor: safeColor,
+    recipientEmail,
+    permission,
+    mode: 'sogo',
+    createdAt: now,
+    updatedAt: now
+  });
+
+  writeAllUserShares(all);
+}
+
+export function updateSogoShareHintPermission(
+  ownerUsername: string,
+  calendarUrl: string,
+  recipientEmail: string,
+  permission: CalendarSharePermission
+): void {
+  const ownerLower = ownerUsername.toLowerCase().trim();
+  const targetCanonical = canonicalizeUrl(calendarUrl);
+  const recipLower = recipientEmail.toLowerCase().trim();
+  if (!ownerLower || !targetCanonical || !recipLower) return;
+
+  const all = readAllUserShares();
+  const now = new Date().toISOString();
+  let changed = false;
+
+  const updated = all.map((r) => {
+    if (
+      r.mode === 'sogo' &&
+      r.ownerUsername.toLowerCase().trim() === ownerLower &&
+      canonicalizeUrl(r.calendarUrl) === targetCanonical &&
+      r.recipientEmail.toLowerCase().trim() === recipLower
+    ) {
+      changed = true;
+      return {
+        ...r,
+        permission: permission === 'write' ? ('write' as const) : ('read' as const),
+        updatedAt: now
+      };
+    }
+    return r;
+  });
+
+  if (changed) {
+    writeAllUserShares(updated);
+  }
+}
+
+export function resolveIncomingSogoHintsForRecipient(
+  recipientEmails: string[]
+): UserCalendarSharePublicInfo[] {
+  const recipientSet = new Set(
+    recipientEmails.map((e) => e.toLowerCase().trim()).filter(Boolean)
+  );
+  if (recipientSet.size === 0) return [];
+
+  const byCalendarKey = new Map<string, UserCalendarSharePublicInfo>();
+  for (const rec of readAllUserShares()) {
+    if (rec.mode !== 'sogo') continue;
+    const recRecipient = rec.recipientEmail.toLowerCase().trim();
+    const recOwner = rec.ownerUsername.toLowerCase().trim();
+    if (!recipientSet.has(recRecipient) || recipientSet.has(recOwner)) {
+      continue;
+    }
+
+    const key = canonicalizeUrl(rec.calendarUrl);
+    const info = toPublicInfo(rec);
+    const existing = byCalendarKey.get(key);
+    if (!existing || (existing.permission !== 'write' && info.permission === 'write')) {
+      byCalendarKey.set(key, info);
+    }
+  }
+
+  return Array.from(byCalendarKey.values());
 }

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import net from 'node:net';
 import { createDAVClient } from 'tsdav';
 import {
   CalendarEventDTO,
@@ -12,6 +13,7 @@ export interface CalDavCredentials {
   serverUrl: string;
   username: string;
   password: string;
+  clientIp?: string;
 }
 
 export interface CalendarInfoDTO {
@@ -216,6 +218,15 @@ export async function readResponseTextSmart(res: Response): Promise<string> {
   }
 }
 
+export function buildForwardedIpHeaders(clientIp?: string): Record<string, string> {
+  const clean = (clientIp || '').trim().replace(/^::ffff:/i, '');
+  if (!clean || net.isIP(clean) === 0) return {};
+  return {
+    'X-Forwarded-For': clean,
+    'X-Real-IP': clean
+  };
+}
+
 /**
  * Direkte, status-tjekket HTTP/DAV-request mod Mailcow/SOGo.
  */
@@ -234,6 +245,7 @@ export async function davRequest(
     headers: {
       Authorization: `Basic ${auth}`,
       'Accept-Charset': 'utf-8, iso-8859-1;q=0.5',
+      ...buildForwardedIpHeaders(creds.clientIp),
       ...extraHeaders
     },
     body: body !== undefined ? Buffer.from(body, 'utf8') : undefined,
@@ -307,11 +319,18 @@ export function decodeSogoSharedSlugOwner(
   if (!calMatch || !calMatch[1]) return {};
 
   const folderSlug = calMatch[1].trim();
+  const unescapeSogoCss = (part: string): string =>
+    part
+      .replace(/^_(\d)/, '$1')
+      .replace(/_D_/gi, '.')
+      .replace(/_U_/gi, '_')
+      .replace(/_P_/gi, '+');
+
   const sogoEncodedMatch = folderSlug.match(
     /^([a-z0-9._+-]+)_A_([a-z0-9-]+(?:_D_[a-z0-9-]+)+)_(.+)$/i
   );
   if (sogoEncodedMatch) {
-    const owner = `${sogoEncodedMatch[1]}@${sogoEncodedMatch[2].replace(/_D_/gi, '.')}`.trim();
+    const owner = `${unescapeSogoCss(sogoEncodedMatch[1])}@${unescapeSogoCss(sogoEncodedMatch[2])}`.trim();
     const slug = sogoEncodedMatch[3].trim();
     if (owner.toLowerCase() !== normalizedUser && owner.toLowerCase() !== normalizedUser.split('@')[0]) {
       return { owner, slug };
@@ -366,6 +385,7 @@ interface PropfindHints {
  */
 export async function connectCalDav(creds: CalDavCredentials) {
   const serverUrl = normalizeMailcowUrl(creds.serverUrl);
+  const ipHeaders = buildForwardedIpHeaders(creds.clientIp);
 
   const client = await createDAVClient({
     serverUrl,
@@ -374,7 +394,8 @@ export async function connectCalDav(creds: CalDavCredentials) {
       password: creds.password
     },
     authMethod: 'Basic',
-    defaultAccountType: 'caldav'
+    defaultAccountType: 'caldav',
+    ...(Object.keys(ipHeaders).length > 0 ? { fetchOptions: { headers: ipHeaders } } : {})
   });
 
   return { client, serverUrl };
@@ -787,6 +808,118 @@ async function discoverSogoPrincipalHomesAndDelegates(creds: CalDavCredentials):
   };
 }
 
+/**
+ * Finder delte SOGo-kalendere via Inverse-DAV <collection-query> på brugerens principal,
+ * så også delinger der endnu ikke er abonneret i SOGo Webmail opdages automatisk.
+ */
+async function discoverSogoSharedCalendarsViaCollectionQuery(
+  creds: CalDavCredentials
+): Promise<Array<{ url: string; owner?: string; displayName?: string }>> {
+  const base = ensureTrailingSlash(normalizeMailcowUrl(creds.serverUrl));
+  const baseOrigin = new URL(base).origin;
+  const baseOriginLower = baseOrigin.toLowerCase();
+  const normalizedUser = creds.username.toLowerCase().trim();
+  const userLocalPart = normalizedUser.split('@')[0];
+  const userDomain = normalizedUser.includes('@') ? normalizedUser.split('@')[1] : '';
+  const rawUser = creds.username.trim();
+  const encodedUser = encodeURIComponent(rawUser);
+
+  const principalCandidates = [`${base}${rawUser}/`];
+  if (encodedUser !== rawUser) {
+    principalCandidates.push(`${base}${encodedUser}/`);
+  }
+
+  const ownerFilters = Array.from(new Set(['@', ...(userDomain ? [userDomain] : [])]));
+  const discovered = new Map<string, { url: string; owner?: string; displayName?: string }>();
+
+  for (const ownerFilter of ownerFilters) {
+    const body = `<?xml version="1.0" encoding="utf-8"?><collection-query xmlns="urn:inverse:params:xml:ns:inverse-dav"><prop-match name="resource-type">calendar</prop-match><prop-match name="owner">/SOGo/dav/${escapeXml(ownerFilter)}/</prop-match></collection-query>`;
+
+    let responseXml: string | null = null;
+    for (const cand of principalCandidates) {
+      try {
+        const res = await davRequest(
+          creds,
+          'REPORT',
+          cand,
+          body,
+          { 'Content-Type': 'application/xml; charset=utf-8' },
+          8000
+        );
+        responseXml = await readResponseTextSmart(res);
+        break;
+      } catch {
+        // Prøv næste principal-kandidat
+      }
+    }
+
+    if (!responseXml) continue;
+
+    const responseBlocks =
+      responseXml.match(/<(?:[a-zA-Z0-9_-]+:)?response\b[\s\S]*?<\/(?:[a-zA-Z0-9_-]+:)?response>/gi) ||
+      [];
+
+    for (const block of responseBlocks) {
+      const hrefMatch = block.match(
+        /<(?:[a-zA-Z0-9_-]+:)?href(?:\s[^>]*?)?(?<!\/)>([^<]+)<\/(?:[a-zA-Z0-9_-]+:)?href>/i
+      );
+      if (!hrefMatch) continue;
+      const rawHref = hrefMatch[1].trim();
+      let fullUrl: string;
+      try {
+        const u = new URL(rawHref, baseOrigin);
+        if (u.origin.toLowerCase() !== baseOriginLower) continue;
+        fullUrl = ensureTrailingSlash(u.toString());
+      } catch {
+        continue;
+      }
+
+      if (isInternalNonCalendarUrl(fullUrl)) continue;
+
+      let decodedUrl = fullUrl;
+      try {
+        decodedUrl = decodeURIComponent(fullUrl);
+      } catch {
+        decodedUrl = fullUrl;
+      }
+
+      const okXml = extractOkPropstatXml(block);
+      const ownerTag = extractTagInnerXml(block, 'owner') || extractTagInnerXml(okXml, 'owner');
+      let calOwner: string | undefined;
+      if (ownerTag) {
+        const ownerHref = extractHrefs(ownerTag)[0] || ownerTag;
+        const m = decodeURIComponent(ownerHref).match(/\/SOGo\/dav\/([^/]+)/i);
+        if (m && m[1]) calOwner = m[1].trim();
+      }
+      if (!calOwner) {
+        const urlMatch = decodedUrl.match(/\/SOGo\/dav\/([^/]+)\/Calendar\//i);
+        if (urlMatch && urlMatch[1]) calOwner = urlMatch[1].trim();
+      }
+
+      const ownerLower = (calOwner || '').toLowerCase().trim();
+      if (!ownerLower || ownerLower === normalizedUser || ownerLower === userLocalPart) {
+        continue;
+      }
+
+      const rawDisplay = extractTagInnerXml(okXml, 'displayname') || extractTagInnerXml(block, 'displayname');
+      const displayName = rawDisplay
+        ? normalizeDanishText(rawDisplay.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim()) || undefined
+        : undefined;
+
+      const key = canonicalCalendarKey(fullUrl);
+      if (!discovered.has(key)) {
+        discovered.set(key, { url: fullUrl, owner: calOwner, displayName });
+      }
+    }
+
+    if (discovered.size > 0 && ownerFilter === '@') {
+      break;
+    }
+  }
+
+  return Array.from(discovered.values());
+}
+
 function canonicalSharedCalendarSignature(
   cal: CalendarInfoDTO,
   normalizedUser: string
@@ -925,6 +1058,38 @@ export async function fetchCalendars(creds: CalDavCredentials): Promise<Calendar
     );
   }
 
+  // 3.5. Opdag delte SOGo-kalendere via Inverse-DAV <collection-query> (finder også delinger uden bruger-abonnement)
+  try {
+    const collectionShared = await discoverSogoSharedCalendarsViaCollectionQuery(creds);
+    const toFetch = collectionShared.filter((item) => {
+      const key = canonicalCalendarKey(item.url);
+      if (discoveredByKey.has(key)) return false;
+      const sig = canonicalSogoCalendarSignature(item.url, item.owner);
+      if (sig && sharedSignatures.has(`shared::${sig.slice('sogo-cal::'.length)}`)) return false;
+      return true;
+    });
+
+    if (toFetch.length > 0) {
+      const fetched = await Promise.allSettled(
+        toFetch.map((item) =>
+          fetchCalendarsDirectPropfind(creds, item.url, '0', {
+            defaultShared: true,
+            defaultOwner: item.owner
+          })
+        )
+      );
+      for (const r of fetched) {
+        if (r.status === 'fulfilled') {
+          for (const cal of r.value) {
+            tryAddCalendar(cal);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('SOGo collection-query delingsopdagelse fejlede:', err);
+  }
+
   // 4. Supplerende tsdav standard discovery mod /SOGo/dav/
   try {
     const { client } = await connectCalDav(creds);
@@ -1050,6 +1215,31 @@ export async function fetchSingleCalendarByUrl(
     readOnly,
     isShared,
     owner
+  };
+}
+
+/**
+ * Verificerer og henter metadata for en delt kalender med modtagerens egne legitimationsoplysninger.
+ * Kaster HTTP 401/403/404 videre ved tilbagekaldt adgang.
+ */
+export async function verifyAndFetchSharedCalendar(
+  creds: CalDavCredentials,
+  calendarUrl: string,
+  fallbackName?: string,
+  fallbackColor?: string
+): Promise<CalendarInfoDTO | null> {
+  const normalizedCalUrl = ensureTrailingSlash(calendarUrl.trim());
+  const found = await fetchCalendarsDirectPropfind(creds, normalizedCalUrl, '0', {
+    defaultShared: true
+  });
+  if (found.length === 0) return null;
+  const cal = found[0];
+  return {
+    ...cal,
+    name: cal.name || fallbackName?.trim() || 'Delt kalender',
+    color: cal.color || fallbackColor || FALLBACK_COLORS[0],
+    serverColor: cal.serverColor || fallbackColor || FALLBACK_COLORS[0],
+    isShared: true
   };
 }
 

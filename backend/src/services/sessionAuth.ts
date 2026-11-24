@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import net from 'node:net';
 import { encryptJson, decryptJson } from './cryptoStore.js';
 import { resolveServerConfig, type MailServerCredentials } from './mailClient.js';
 import { normalizeMailcowUrl, type CalDavCredentials } from './davClient.js';
@@ -13,11 +14,79 @@ export interface SuiteSessionPayload extends MailServerCredentials {
   exp: number;
 }
 
+function normalizeIpCandidate(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  let clean = raw.trim();
+  if (!clean) return undefined;
+  if (clean.startsWith('[')) {
+    const endBracket = clean.indexOf(']');
+    if (endBracket > 1) {
+      clean = clean.slice(1, endBracket).trim();
+    }
+  } else if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(clean)) {
+    clean = clean.replace(/:\d+$/, '');
+  }
+  if (/^::ffff:/i.test(clean)) {
+    const mapped = clean.slice(7);
+    if (net.isIPv4(mapped)) clean = mapped;
+  }
+  return net.isIP(clean) !== 0 ? clean : undefined;
+}
+
+function isPrivateOrLoopbackIp(ip: string): boolean {
+  const lower = ip.toLowerCase();
+  if (lower === '::1' || lower === '::') return true;
+  if (lower.startsWith('fe80:') || lower.startsWith('fc') || lower.startsWith('fd')) {
+    return true;
+  }
+  if (net.isIPv4(lower)) {
+    const parts = lower.split('.').map(Number);
+    if (parts[0] === 127 || parts[0] === 10 || parts[0] === 0) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 169 && parts[1] === 254) return true;
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
+  }
+  return false;
+}
+
+export function extractClientIp(req: Request): string | undefined {
+  const remoteIp = normalizeIpCandidate(req.socket?.remoteAddress || '');
+  const rawTrust = (process.env.TRUST_PROXY || '').trim().toLowerCase();
+  const trustHeaders =
+    rawTrust !== 'false' &&
+    rawTrust !== '0' &&
+    (rawTrust === 'true' || !remoteIp || isPrivateOrLoopbackIp(remoteIp));
+
+  if (trustHeaders) {
+    for (const hName of ['cf-connecting-ip', 'true-client-ip', 'x-real-ip']) {
+      const hVal = req.headers[hName];
+      const rawStr = Array.isArray(hVal) ? hVal[0] : hVal;
+      const cand = normalizeIpCandidate(typeof rawStr === 'string' ? rawStr : undefined);
+      if (cand) return cand;
+    }
+
+    const xff = req.headers['x-forwarded-for'];
+    const xffStr = Array.isArray(xff) ? xff.join(',') : xff;
+    if (typeof xffStr === 'string' && xffStr.trim()) {
+      const candidates = xffStr
+        .split(',')
+        .map((s) => normalizeIpCandidate(s))
+        .filter((ip): ip is string => Boolean(ip));
+      const publicIp = candidates.find((ip) => !isPrivateOrLoopbackIp(ip));
+      if (publicIp) return publicIp;
+      if (candidates.length > 0) return candidates[0];
+    }
+  }
+
+  return normalizeIpCandidate(req.ip || '') || remoteIp;
+}
+
 export function createRateLimiter(maxHits: number, windowMs: number, errorMessage: string) {
   const hits = new Map<string, { count: number; resetAt: number }>();
 
   return (req: Request, res: Response, next: NextFunction) => {
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const ip = extractClientIp(req) || req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     const record = hits.get(ip);
 
@@ -182,7 +251,8 @@ export function requireMailCredentials(req: Request): MailServerCredentials {
       smtpPort: session.smtpPort,
       smtpSecure: session.smtpSecure,
       username: session.username,
-      password: session.password
+      password: session.password,
+      clientIp: extractClientIp(req)
     };
   }
   throw new Error('Ikke logget ind. Log venligst ind igen.');
@@ -197,7 +267,8 @@ export function requireDavCredentials(req: Request): CalDavCredentials {
     return {
       serverUrl: derivedUrl,
       username: session.username,
-      password: session.password
+      password: session.password,
+      clientIp: extractClientIp(req)
     };
   }
   throw new Error('Ikke logget ind. Log venligst ind igen.');

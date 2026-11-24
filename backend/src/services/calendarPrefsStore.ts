@@ -286,3 +286,13 @@ export function removeDismissedSharedCalendarForEmails(
     writeAllPrefs(all);
   }
 }
+
+export function clearDismissedSharedCalendars(username: string): void {
+  const userKey = username.toLowerCase().trim();
+  if (!userKey) return;
+  const all = readAllPrefs();
+  const entry = all[userKey];
+  if (!entry || entry.dismissedSharedCalendars.length === 0) return;
+  entry.dismissedSharedCalendars = [];
+  writeAllPrefs(all);
+}

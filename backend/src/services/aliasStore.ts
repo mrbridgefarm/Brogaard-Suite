@@ -309,3 +309,24 @@ export function mergeDiscoveredAliasesForUser(
 
   return list;
 }
+
+export function findUsernamesOwningEmail(email: string): string[] {
+  const target = (email || '').toLowerCase().trim();
+  if (!target) return [];
+  const all = readAllAliases();
+  const owners = new Set<string>([target]);
+
+  for (const [usernameLower, list] of Object.entries(all)) {
+    const cleanOwner = usernameLower.toLowerCase().trim();
+    if (!cleanOwner) continue;
+    if (
+      cleanOwner === target ||
+      (Array.isArray(list) &&
+        list.some((a) => String(a?.email || '').toLowerCase().trim() === target))
+    ) {
+      owners.add(cleanOwner);
+    }
+  }
+
+  return Array.from(owners);
+}

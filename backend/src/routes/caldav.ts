@@ -6,6 +6,8 @@ import {
   type CalendarInfoDTO,
   fetchCalendars,
   fetchSingleCalendarByUrl,
+  verifyAndFetchSharedCalendar,
+  canonicalSogoCalendarSignature,
   fetchAllEvents,
   saveCalDavEvent,
   deleteCalDavEvent,
@@ -36,6 +38,9 @@ import {
   updateUserCalendarSharePermission,
   deleteUserCalendarShare,
   removeUserCalendarShareByTarget,
+  upsertSogoShareHint,
+  updateSogoShareHintPermission,
+  resolveIncomingSogoHintsForRecipient,
   leaveIncomingUserCalendarShare,
   resolveIncomingSharesForRecipient,
   findAuthorizedIncomingShareForUrl,
@@ -49,6 +54,7 @@ import {
   upsertSogoCalendarShare,
   updateSogoCalendarSharePermission,
   revokeSogoCalendarShare,
+  subscribeToSogoSharedCalendar,
   unsubscribeFromSogoSharedCalendar
 } from '../services/sogoAclService.js';
 import {
@@ -58,9 +64,10 @@ import {
   isSharedCalendarDismissed,
   addDismissedSharedCalendar,
   removeDismissedSharedCalendar,
-  removeDismissedSharedCalendarForEmails
+  removeDismissedSharedCalendarForEmails,
+  clearDismissedSharedCalendars
 } from '../services/calendarPrefsStore.js';
-import { getAliasesForUser } from '../services/aliasStore.js';
+import { getAliasesForUser, findUsernamesOwningEmail } from '../services/aliasStore.js';
 import {
   addUserSubscription,
   removeUserSubscription,
@@ -162,6 +169,7 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
 
     const identityEmails = getCallerIdentityEmails(creds.username);
     const incomingShares = resolveIncomingSharesForRecipient(identityEmails);
+    const incomingSogoHints = resolveIncomingSogoHintsForRecipient(identityEmails);
     const activeIncomingKeys = new Set(
       incomingShares.map((item) => canonicalCalKey(item.share.calendarUrl))
     );
@@ -171,12 +179,33 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
       syncUserSubscriptions(creds, clientSubscriptions)
     ]);
 
-    const visibleCaldavCalendars = caldavCalendars.filter(
-      (c) =>
-        !c.isShared ||
-        activeIncomingKeys.has(canonicalCalKey(c.url)) ||
-        !isSharedCalendarDismissed(creds.username, c.id, c.url)
-    );
+    let dismissedSharedCount = 0;
+    const visibleCaldavCalendars = caldavCalendars.filter((c) => {
+      if (!c.isShared || activeIncomingKeys.has(canonicalCalKey(c.url))) return true;
+      if (isSharedCalendarDismissed(creds.username, c.id, c.url)) {
+        dismissedSharedCount += 1;
+        return false;
+      }
+      return true;
+    });
+
+    const ownCalHomePrefix = `/SOGo/dav/${creds.username.toLowerCase().trim()}/`;
+    for (const c of visibleCaldavCalendars) {
+      if (c.isShared && c.url) {
+        let dec = c.url;
+        try {
+          dec = decodeURIComponent(c.url);
+        } catch {
+          dec = c.url;
+        }
+        if (
+          /\/SOGo\/dav\/[^/]+\/Calendar\/[^/]+\/?$/i.test(dec) &&
+          !dec.toLowerCase().includes(ownCalHomePrefix)
+        ) {
+          void subscribeToSogoSharedCalendar(creds, c.url).catch(() => {});
+        }
+      }
+    }
 
     const mergedCalendars: CalendarInfoDTO[] = [...visibleCaldavCalendars];
     const caldavEvents = await fetchAllEvents(creds, visibleCaldavCalendars, timeRange);
@@ -263,6 +292,66 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
       }
     }
 
+    // Hent direkte delte SOGo-kalendere via kodeordsfri opdagelseshints (med modtagerens eget login)
+    if (incomingSogoHints.length > 0) {
+      const presentKeys = new Set(mergedCalendars.map((c) => canonicalCalKey(c.url)));
+      const presentSigs = new Set(
+        mergedCalendars
+          .map((c) => canonicalSogoCalendarSignature(c.url, c.owner))
+          .filter((s): s is string => Boolean(s))
+      );
+
+      const hintsToFetch = [];
+      for (const hint of incomingSogoHints) {
+        const hintKey = canonicalCalKey(hint.calendarUrl);
+        const hintSig = canonicalSogoCalendarSignature(hint.calendarUrl, hint.ownerUsername);
+        if (presentKeys.has(hintKey) || (hintSig && presentSigs.has(hintSig))) {
+          continue;
+        }
+        if (isSharedCalendarDismissed(creds.username, hint.calendarUrl, hint.calendarUrl)) {
+          dismissedSharedCount += 1;
+          continue;
+        }
+        hintsToFetch.push(hint);
+      }
+
+      if (hintsToFetch.length > 0) {
+        const hintResults = await Promise.allSettled(
+          hintsToFetch.map(async (hint) => {
+            try {
+              const cal = await verifyAndFetchSharedCalendar(
+                creds,
+                hint.calendarUrl,
+                hint.calendarName,
+                hint.calendarColor
+              );
+              if (!cal) return null;
+              void subscribeToSogoSharedCalendar(creds, cal.url).catch(() => {});
+              const evs = await fetchAllEvents(creds, [cal], timeRange);
+              return { cal, evs };
+            } catch (err: any) {
+              const msg = String(err?.message || err);
+              if (/HTTP (?:401|403|404)\b/.test(msg)) {
+                removeUserCalendarShareByTarget(
+                  hint.ownerUsername,
+                  hint.calendarUrl,
+                  hint.recipientEmail
+                );
+              }
+              throw err;
+            }
+          })
+        );
+
+        for (const hr of hintResults) {
+          if (hr.status === 'fulfilled' && hr.value) {
+            mergedCalendars.push(hr.value.cal);
+            mergedEvents.push(...hr.value.evs);
+          }
+        }
+      }
+    }
+
     const allCalendars = [...mergedCalendars, ...subData.calendars];
     const savedNameOverrides = getCalendarNameOverrides(creds.username);
     const clientNameOverrides: Record<string, string> = { ...savedNameOverrides };
@@ -285,6 +374,7 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
       calendars: allCalendars,
       events: [...mergedEvents, ...subData.events],
       nameOverrides: clientNameOverrides,
+      dismissedSharedCount,
       syncedAt: new Date().toISOString()
     });
   } catch (err: any) {
@@ -871,10 +961,23 @@ caldavRouter.post('/user-shares', async (req: Request, res: Response) => {
       if (sogoShare.recipientUid) {
         removeUserCalendarShareByTarget(creds.username, calendarUrl, sogoShare.recipientUid);
       }
-      removeDismissedSharedCalendarForEmails(
-        [recipientEmail, sogoShare.recipientEmail, sogoShare.recipientUid],
-        calendarUrl
+      upsertSogoShareHint({
+        ownerUsername: creds.username,
+        ownerServerUrl: creds.serverUrl,
+        calendarUrl: sogoShare.calendarUrl,
+        calendarName: sogoShare.calendarName,
+        calendarColor: sogoShare.calendarColor,
+        recipientEmail: sogoShare.recipientEmail,
+        permission: sogoShare.permission
+      });
+      const recipientTargets = Array.from(
+        new Set(
+          [recipientEmail, sogoShare.recipientEmail, sogoShare.recipientUid].flatMap((em) =>
+            findUsernamesOwningEmail(em)
+          )
+        )
       );
+      removeDismissedSharedCalendarForEmails(recipientTargets, calendarUrl);
       res.json({ ok: true, userShare: sogoShare });
       return;
     } catch (sogoErr: any) {
@@ -922,6 +1025,12 @@ caldavRouter.patch('/user-shares/:id', async (req: Request, res: Response) => {
         calendarName: req.body?.calendarName ? String(req.body.calendarName) : undefined,
         calendarColor: req.body?.calendarColor ? String(req.body.calendarColor) : undefined
       });
+      updateSogoShareHintPermission(
+        creds.username,
+        updated.calendarUrl,
+        updated.recipientEmail,
+        permission
+      );
       res.json({ ok: true, userShare: updated });
       return;
     }
@@ -1003,6 +1112,23 @@ caldavRouter.post('/user-shares/leave', async (req: Request, res: Response) => {
     res.status(400).json({
       ok: false,
       error: err?.message || 'Kunne ikke forlade den delte kalender.'
+    });
+  }
+});
+
+/**
+ * POST /api/caldav/user-shares/restore-dismissed
+ * Gendanner delte kalendere som brugeren tidligere har forladt/fravalgt.
+ */
+caldavRouter.post('/user-shares/restore-dismissed', (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    clearDismissedSharedCalendars(creds.username);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(401).json({
+      ok: false,
+      error: err?.message || 'Kræver aktivt login.'
     });
   }
 });

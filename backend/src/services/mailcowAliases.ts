@@ -4,7 +4,8 @@ import {
   assertSafeCalDavUrl,
   assertSameServerOrigin,
   readResponseTextSmart,
-  ensureTrailingSlash
+  ensureTrailingSlash,
+  buildForwardedIpHeaders
 } from './davClient.js';
 import { normalizeDanishText } from './icalMapper.js';
 import {
@@ -78,7 +79,8 @@ async function propfindDav(
       Authorization: `Basic ${auth}`,
       'Content-Type': 'application/xml; charset=utf-8',
       'Accept-Charset': 'utf-8, iso-8859-1;q=0.5',
-      Depth: '0'
+      Depth: '0',
+      ...buildForwardedIpHeaders(creds.clientIp)
     },
     body: Buffer.from(xmlBody, 'utf8'),
     signal: AbortSignal.timeout(5000)

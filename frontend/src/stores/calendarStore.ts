@@ -19,6 +19,7 @@ import {
   apiUpdateUserSharePermission,
   apiDeleteUserShare,
   apiLeaveSharedCalendar,
+  apiRestoreDismissedSharedCalendars,
   apiSetCalendarName,
   apiFetchPublicShare,
   apiImportIcs,
@@ -145,6 +146,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   let isFlushing = false;
   let flushRequested = false;
   const hiddenCalendarIds = ref<string[]>(loadHiddenCalendarIds());
+  const dismissedSharedCount = ref<number>(0);
 
   const isPublicShareMode = computed(() => session.value?.mode === 'PUBLIC_SHARE');
   const isAuthenticated = computed(
@@ -406,7 +408,8 @@ export const useCalendarStore = defineStore('calendar', () => {
   async function hydrateAfterLogin(
     user: string,
     initialServerCalendars: Omit<CalendarSource, 'visible'>[],
-    initialNameOverrides?: Record<string, string>
+    initialNameOverrides?: Record<string, string>,
+    initialDismissedSharedCount?: number
   ) {
     session.value = {
       mode: 'CALDAV',
@@ -414,6 +417,7 @@ export const useCalendarStore = defineStore('calendar', () => {
       username: user,
       connectedAt: new Date().toISOString()
     };
+    dismissedSharedCount.value = Number(initialDismissedSharedCount || 0);
 
     await purgeExpiredTrash();
     trashItems.value = await db.trash.orderBy('deletedAt').reverse().toArray();
@@ -450,6 +454,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     shares.value = [];
     userShares.value = [];
     syncQueue.value = [];
+    dismissedSharedCount.value = 0;
     publicShareError.value = '';
     closeContextMenu();
   }
@@ -572,6 +577,7 @@ export const useCalendarStore = defineStore('calendar', () => {
       ]);
       applyColorOverridesToCalendars(mergedCalendars);
       applyNameOverridesToCalendars(mergedCalendars, res.nameOverrides || {});
+      dismissedSharedCount.value = Number(res.dismissedSharedCount || 0);
       const localSubCalIds = new Set(localSubCalendars.map((c) => c.id));
       const preservedSubEvents = events.value
         .filter((e) => localSubCalIds.has(e.calendarId))
@@ -2085,6 +2091,22 @@ export const useCalendarStore = defineStore('calendar', () => {
     await syncWithServer(false);
   }
 
+  async function restoreDismissedSharedCalendars() {
+    if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return;
+    try {
+      await apiRestoreDismissedSharedCalendars();
+      dismissedSharedCount.value = 0;
+      await syncWithServer(false);
+      notify(
+        'Delte kalendere gendannet',
+        'Tidligere forladte delte kalendere vises igen, hvis du stadig har adgang i SOGo.',
+        'success'
+      );
+    } catch (err: any) {
+      notify('Kunne ikke gendanne delte kalendere', err?.message || String(err), 'error');
+    }
+  }
+
   async function removeCalendarLocally(calId: string) {
     calendars.value = calendars.value.filter((c) => c.id !== calId);
     const evIds = events.value.filter((e) => e.calendarId === calId).map((e) => e.id);
@@ -2256,6 +2278,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     editingEvent,
     isEventModalOpen,
     hiddenCalendarIds,
+    dismissedSharedCount,
 
     isPublicShareMode,
     isAuthenticated,
@@ -2314,7 +2337,8 @@ export const useCalendarStore = defineStore('calendar', () => {
     deleteCalendar,
     leaveSharedCalendar,
     hideCalendar,
-    restoreHiddenCalendars
+    restoreHiddenCalendars,
+    restoreDismissedSharedCalendars
   };
 });
 

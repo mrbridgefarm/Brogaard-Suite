@@ -612,6 +612,16 @@ function removeSingleClipboardEvent(evId: string) {
           <RotateCcw class="w-3 h-3" />
           Vis {{ store.hiddenCalendarIds.length }} skjult(e) igen
         </button>
+
+        <button
+          v-if="!store.isPublicShareMode && store.dismissedSharedCount > 0"
+          type="button"
+          class="mt-1.5 w-full py-1 px-2 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/35 text-[11px] text-blue-200 flex items-center justify-center gap-1.5 transition"
+          @click="store.restoreDismissedSharedCalendars()"
+        >
+          <RotateCcw class="w-3 h-3" />
+          Vis {{ store.dismissedSharedCount }} forladt(e) delt(e) kalender(e) igen
+        </button>
       </div>
 
       <div
