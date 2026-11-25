@@ -733,16 +733,6 @@ function removeSingleClipboardEvent(evId: string) {
               <div class="flex items-center gap-0.5 shrink-0">
                 <template v-if="!store.isPublicShareMode">
                   <button
-                    v-if="cal.isContactBirthdays"
-                    type="button"
-                    :disabled="store.isSyncingBirthdaysToMailcow"
-                    class="p-1 rounded hover:bg-emerald-500/20 text-emerald-300 hover:text-emerald-200 transition disabled:opacity-50"
-                    title="Synk fødselsdage og mærkedage fra Kontakter nu"
-                    @click="store.syncBirthdaysToMailcow()"
-                  >
-                    <RefreshCw class="w-3 h-3" :class="store.isSyncingBirthdaysToMailcow ? 'animate-spin' : ''" />
-                  </button>
-                  <button
                     type="button"
                     class="p-1 rounded hover:bg-slate-700 transition"
                     :class="editingCalId === cal.id ? 'bg-slate-700 text-blue-300' : 'text-slate-400 hover:text-slate-100'"

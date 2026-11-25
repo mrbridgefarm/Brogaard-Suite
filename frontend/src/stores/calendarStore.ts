@@ -703,7 +703,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     isSyncing.value = true;
     try {
       await flushSyncQueue();
-      const res = await apiSyncCalDav(undefined, loadLocalSubscriptions());
+      const res = await apiSyncCalDav(undefined, loadLocalSubscriptions(), !silent);
 
       const visibilityMap = new Map(calendars.value.map((c) => [c.id, c.visible]));
       const hiddenSet = new Set(hiddenCalendarIds.value);

@@ -43,13 +43,14 @@ export interface LocalSubscriptionHint {
 
 export async function apiSyncCalDav(
   timeRange?: { start: string; end: string },
-  subscriptions?: LocalSubscriptionHint[]
+  subscriptions?: LocalSubscriptionHint[],
+  forceBirthdaySync = false
 ): Promise<SyncResponse> {
   const res = await fetch('/api/caldav/sync', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ timeRange, subscriptions })
+    body: JSON.stringify({ timeRange, subscriptions, forceBirthdaySync })
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {

@@ -191,6 +191,7 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
     const clientSubscriptions = Array.isArray(req.body?.subscriptions)
       ? req.body.subscriptions
       : undefined;
+    const forceBirthdaySync = Boolean(req.body?.forceBirthdaySync);
 
     const identityEmails = getCallerIdentityEmails(creds.username);
     const incomingShares = resolveIncomingSharesForRecipient(identityEmails);
@@ -199,7 +200,7 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
       incomingShares.map((item) => canonicalCalKey(item.share.calendarUrl))
     );
 
-    await maybeAutoSyncContactBirthdays(creds);
+    await maybeAutoSyncContactBirthdays(creds, forceBirthdaySync ? 0 : undefined);
 
     const [caldavCalendars, subData] = await Promise.all([
       fetchCalendars(creds),
