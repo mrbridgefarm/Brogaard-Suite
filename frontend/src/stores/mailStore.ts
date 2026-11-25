@@ -77,6 +77,8 @@ export const useMailStore = defineStore('mail', () => {
   const messages = ref<MailHeader[]>([]);
   const totalFolderMessages = ref(0);
   const selectedMessageIds = ref<string[]>([]);
+  const selectionAnchorId = ref<string | null>(null);
+  const selectionFocusId = ref<string | null>(null);
   const activeMessageId = ref<string | null>(null);
   const activeMessageDetail = ref<MailDetail | null>(null);
 
@@ -354,6 +356,8 @@ export const useMailStore = defineStore('mail', () => {
     folders.value = [];
     messages.value = [];
     selectedMessageIds.value = [];
+    selectionAnchorId.value = null;
+    selectionFocusId.value = null;
     activeMessageId.value = null;
     activeMessageDetail.value = null;
     aliases.value = [];
@@ -413,6 +417,8 @@ export const useMailStore = defineStore('mail', () => {
     }
     activeFolderPath.value = folderPath;
     selectedMessageIds.value = [];
+    selectionAnchorId.value = null;
+    selectionFocusId.value = null;
     activeMessageId.value = null;
     activeMessageDetail.value = null;
     await loadFolderMessages(folderPath, false);
@@ -506,10 +512,14 @@ export const useMailStore = defineStore('mail', () => {
       } else {
         selectedMessageIds.value = [...selectedMessageIds.value, msg.id];
       }
+      selectionAnchorId.value = msg.id;
+      selectionFocusId.value = msg.id;
       return;
     }
 
     selectedMessageIds.value = [msg.id];
+    selectionAnchorId.value = msg.id;
+    selectionFocusId.value = msg.id;
     activeMessageId.value = msg.id;
 
     try {
@@ -552,31 +562,82 @@ export const useMailStore = defineStore('mail', () => {
 
   function selectMessageRange(targetMsg: MailHeader) {
     const list = filteredMessages.value;
-    if (selectedMessageIds.value.length === 0) {
+    const anchorId =
+      selectionAnchorId.value ||
+      activeMessageId.value ||
+      selectedMessageIds.value[0] ||
+      null;
+
+    if (!anchorId) {
       selectedMessageIds.value = [targetMsg.id];
+      selectionAnchorId.value = targetMsg.id;
+      selectionFocusId.value = targetMsg.id;
       return;
     }
-    const lastId = selectedMessageIds.value[selectedMessageIds.value.length - 1];
-    const startIdx = list.findIndex((m) => m.id === lastId);
+
+    const startIdx = list.findIndex((m) => m.id === anchorId);
     const endIdx = list.findIndex((m) => m.id === targetMsg.id);
     if (startIdx === -1 || endIdx === -1) {
       selectedMessageIds.value = [targetMsg.id];
+      selectionAnchorId.value = targetMsg.id;
+      selectionFocusId.value = targetMsg.id;
       return;
     }
+
     const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-    const rangeIds = list.slice(from, to + 1).map((m) => m.id);
-    selectedMessageIds.value = Array.from(new Set([...selectedMessageIds.value, ...rangeIds]));
+    selectedMessageIds.value = list.slice(from, to + 1).map((m) => m.id);
+    selectionAnchorId.value = list[startIdx].id;
+    selectionFocusId.value = targetMsg.id;
   }
 
   function selectAllInCurrentList() {
     selectedMessageIds.value = filteredMessages.value.map((m) => m.id);
+    if (filteredMessages.value.length > 0) {
+      selectionAnchorId.value = filteredMessages.value[0].id;
+      selectionFocusId.value = filteredMessages.value[filteredMessages.value.length - 1].id;
+    }
   }
 
-  function navigateSelection(delta: 1 | -1) {
+  function navigateSelection(delta: 1 | -1, extendSelection = false) {
     const list = filteredMessages.value;
     if (list.length === 0) return;
 
-    const currentId = activeMessageId.value || selectedMessageIds.value[0];
+    if (extendSelection) {
+      const currentFocusId =
+        selectionFocusId.value ||
+        activeMessageId.value ||
+        selectedMessageIds.value[selectedMessageIds.value.length - 1] ||
+        null;
+      const currentFocusIdx = currentFocusId
+        ? list.findIndex((m) => m.id === currentFocusId)
+        : -1;
+
+      if (currentFocusIdx === -1) {
+        const initial = delta > 0 ? list[0] : list[list.length - 1];
+        selectionAnchorId.value = initial.id;
+        selectionFocusId.value = initial.id;
+        selectedMessageIds.value = [initial.id];
+        return;
+      }
+
+      const anchorId = selectionAnchorId.value || list[currentFocusIdx].id;
+      const anchorIdx = list.findIndex((m) => m.id === anchorId);
+      const effectiveAnchorIdx = anchorIdx === -1 ? currentFocusIdx : anchorIdx;
+      const nextFocusIdx = Math.max(0, Math.min(list.length - 1, currentFocusIdx + delta));
+
+      const [from, to] =
+        effectiveAnchorIdx < nextFocusIdx
+          ? [effectiveAnchorIdx, nextFocusIdx]
+          : [nextFocusIdx, effectiveAnchorIdx];
+
+      selectionAnchorId.value = list[effectiveAnchorIdx].id;
+      selectionFocusId.value = list[nextFocusIdx].id;
+      selectedMessageIds.value = list.slice(from, to + 1).map((m) => m.id);
+      return;
+    }
+
+    const currentId =
+      selectionFocusId.value || activeMessageId.value || selectedMessageIds.value[0];
     const currentIdx = list.findIndex((m) => m.id === currentId);
     const nextIdx =
       currentIdx === -1 ? 0 : Math.max(0, Math.min(list.length - 1, currentIdx + delta));
@@ -804,6 +865,12 @@ export const useMailStore = defineStore('mail', () => {
         activeMessageId.value = null;
         activeMessageDetail.value = null;
       }
+      if (selectionAnchorId.value && idSet.has(selectionAnchorId.value)) {
+        selectionAnchorId.value = null;
+      }
+      if (selectionFocusId.value && idSet.has(selectionFocusId.value)) {
+        selectionFocusId.value = null;
+      }
       selectedMessageIds.value = selectedMessageIds.value.filter((id) => !idSet.has(id));
 
       const targetName =
@@ -894,6 +961,12 @@ export const useMailStore = defineStore('mail', () => {
         activeMessageId.value = null;
         activeMessageDetail.value = null;
       }
+      if (selectionAnchorId.value && idSet.has(selectionAnchorId.value)) {
+        selectionAnchorId.value = null;
+      }
+      if (selectionFocusId.value && idSet.has(selectionFocusId.value)) {
+        selectionFocusId.value = null;
+      }
       selectedMessageIds.value = selectedMessageIds.value.filter((id) => !idSet.has(id));
 
       try {
@@ -963,6 +1036,12 @@ export const useMailStore = defineStore('mail', () => {
       if (activeMessageId.value && idSet.has(activeMessageId.value)) {
         activeMessageId.value = null;
         activeMessageDetail.value = null;
+      }
+      if (selectionAnchorId.value && idSet.has(selectionAnchorId.value)) {
+        selectionAnchorId.value = null;
+      }
+      if (selectionFocusId.value && idSet.has(selectionFocusId.value)) {
+        selectionFocusId.value = null;
       }
       selectedMessageIds.value = selectedMessageIds.value.filter((id) => !idSet.has(id));
 
@@ -1366,6 +1445,8 @@ export const useMailStore = defineStore('mail', () => {
     messages,
     totalFolderMessages,
     selectedMessageIds,
+    selectionAnchorId,
+    selectionFocusId,
     activeMessageId,
     activeMessageDetail,
     searchQuery,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch, nextTick } from 'vue';
 import {
   Star,
   Paperclip,
@@ -25,6 +25,22 @@ const props = defineProps<{
 
 const store = useMailStore();
 const { currentTheme } = useTheme();
+const listScrollRef = ref<HTMLElement | null>(null);
+
+watch(
+  () => store.selectionFocusId || store.activeMessageId,
+  async (focusId) => {
+    if (!focusId || !listScrollRef.value) return;
+    await nextTick();
+    const rows = listScrollRef.value.querySelectorAll<HTMLElement>('[data-mail-row-id]');
+    for (const row of rows) {
+      if (row.dataset.mailRowId === focusId) {
+        row.scrollIntoView({ block: 'nearest' });
+        break;
+      }
+    }
+  }
+);
 
 const selectedIdSet = computed(() => new Set(store.selectedMessageIds));
 const clipIdSet = computed(() => new Set(store.clipboard.messages.map((m) => m.id)));
@@ -38,6 +54,8 @@ const allSelected = computed(
 function toggleSelectAll() {
   if (allSelected.value) {
     store.selectedMessageIds = [];
+    store.selectionAnchorId = null;
+    store.selectionFocusId = null;
   } else {
     store.selectAllInCurrentList();
   }
@@ -141,6 +159,12 @@ function formatSmartDate(iso: string): string {
         <span class="text-[11px] text-slate-400">
           ({{ store.filteredMessages.length }})
         </span>
+        <span
+          v-if="store.selectedMessageIds.length > 1"
+          class="px-1.5 py-0.5 rounded-md bg-blue-500/20 border border-blue-400/35 text-blue-200 text-[10px] font-semibold whitespace-nowrap"
+        >
+          {{ store.selectedMessageIds.length }} valgt
+        </span>
       </div>
 
       <!-- Hurtige batch-knapper når 1+ e-mails er markeret -->
@@ -151,7 +175,7 @@ function formatSmartDate(iso: string): string {
           title="Skift læst/ulæst"
           @click="
             store.toggleSeenForMessages(
-              store.messages.filter((m) => selectedIdSet.has(m.id))
+              store.filteredMessages.filter((m) => selectedIdSet.has(m.id))
             )
           "
         >
@@ -163,7 +187,7 @@ function formatSmartDate(iso: string): string {
           title="Skift stjernemarkering"
           @click="
             store.toggleFlaggedForMessages(
-              store.messages.filter((m) => selectedIdSet.has(m.id))
+              store.filteredMessages.filter((m) => selectedIdSet.has(m.id))
             )
           "
         >
@@ -177,7 +201,7 @@ function formatSmartDate(iso: string): string {
             : 'Markér valgte som Spam (flyt til Spam-mappen så Rspamd lærer af det)'"
           @click="
             store.markMessagesAsSpam(
-              store.messages.filter((m) => selectedIdSet.has(m.id))
+              store.filteredMessages.filter((m) => selectedIdSet.has(m.id))
             )
           "
         >
@@ -196,7 +220,7 @@ function formatSmartDate(iso: string): string {
     </div>
 
     <!-- Beskedliste -->
-    <div class="flex-1 overflow-y-auto divide-y divide-slate-800/70">
+    <div ref="listScrollRef" class="flex-1 overflow-y-auto divide-y divide-slate-800/70">
       <div
         v-if="store.filteredMessages.length === 0"
         class="p-8 text-center text-xs text-slate-400 space-y-2"
@@ -211,13 +235,16 @@ function formatSmartDate(iso: string): string {
       <div
         v-for="msg in store.filteredMessages"
         :key="msg.id"
+        :data-mail-row-id="msg.id"
         draggable="true"
         class="px-3 py-2.5 cursor-pointer transition relative group flex items-start gap-2.5"
         :class="[
-          store.activeMessageId === msg.id
-            ? 'bg-blue-600/20 border-l-2 border-l-blue-500'
-            : selectedIdSet.has(msg.id)
-              ? 'bg-slate-800/80 border-l-2 border-l-blue-400'
+          selectedIdSet.has(msg.id)
+            ? store.selectionFocusId === msg.id && store.selectedMessageIds.length > 1
+              ? 'bg-blue-600/30 border-l-2 border-l-blue-300 ring-1 ring-inset ring-blue-400/40'
+              : 'bg-blue-600/20 border-l-2 border-l-blue-500'
+            : store.activeMessageId === msg.id
+              ? 'bg-blue-600/20 border-l-2 border-l-blue-500'
               : currentTheme.wallpaper
                 ? msg.seen
                   ? 'bg-transparent hover:bg-white/5'

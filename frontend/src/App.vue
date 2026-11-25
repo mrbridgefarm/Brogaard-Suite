@@ -173,10 +173,10 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
       }
     } else if (!isCtrlOrMeta && e.key === 'ArrowDown') {
       e.preventDefault();
-      mailStore.navigateSelection(1);
+      mailStore.navigateSelection(1, e.shiftKey);
     } else if (!isCtrlOrMeta && e.key === 'ArrowUp') {
       e.preventDefault();
-      mailStore.navigateSelection(-1);
+      mailStore.navigateSelection(-1, e.shiftKey);
     }
   } else if (suiteStore.activeModule === 'calendar') {
     if (isCtrlOrMeta && key === 'c') {
