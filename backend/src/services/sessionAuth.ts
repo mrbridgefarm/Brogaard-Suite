@@ -197,9 +197,13 @@ export function getEnabledModules(): SuiteModule[] {
 export function getConfiguredSogoUrl(): string | null {
   const raw = (process.env.SOGO_URL || '').trim();
   if (!raw) return null;
+  const normalizedInput = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) ? raw : `https://${raw}`;
   try {
-    const parsed = new URL(raw);
-    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+    const parsed = new URL(normalizedInput);
+    if (
+      (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+      (parsed.hostname.includes('.') || parsed.hostname.toLowerCase() === 'localhost')
+    ) {
       return parsed.toString();
     }
     return null;
