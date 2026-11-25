@@ -39,6 +39,7 @@ import {
 } from '../services/mailApi';
 
 const UNDO_TTL_MS = 30000;
+const MAIL_PAGE_SIZE = 120;
 const LOCAL_ALIASES_PREFIX = 'imap_sync_mail_aliases_';
 const LAYOUT_MODE_KEY = 'imap_sync_mail_layout_mode_v1';
 const READER_THEME_KEY = 'imap_sync_mail_reader_theme_v1';
@@ -76,6 +77,7 @@ export const useMailStore = defineStore('mail', () => {
   const activeFolderPath = ref('INBOX');
   const messages = ref<MailHeader[]>([]);
   const totalFolderMessages = ref(0);
+  const isLoadingMore = ref(false);
   const selectedMessageIds = ref<string[]>([]);
   const selectionAnchorId = ref<string | null>(null);
   const selectionFocusId = ref<string | null>(null);
@@ -355,6 +357,8 @@ export const useMailStore = defineStore('mail', () => {
     }
     folders.value = [];
     messages.value = [];
+    totalFolderMessages.value = 0;
+    isLoadingMore.value = false;
     selectedMessageIds.value = [];
     selectionAnchorId.value = null;
     selectionFocusId.value = null;
@@ -385,7 +389,7 @@ export const useMailStore = defineStore('mail', () => {
         // Ignorér IndexedDB cache-fejl
       }
 
-      await loadFolderMessages(activeFolderPath.value, true);
+      await loadFolderMessages(activeFolderPath.value, true, true);
       lastSyncedAt.value = new Date().toLocaleTimeString('da-DK', {
         hour: '2-digit',
         minute: '2-digit'
@@ -424,13 +428,24 @@ export const useMailStore = defineStore('mail', () => {
     await loadFolderMessages(folderPath, false);
   }
 
-  async function loadFolderMessages(folderPath: string, silent = false) {
+  const hasMoreMessages = computed<boolean>(
+    () =>
+      !searchQuery.value.trim() &&
+      !isGlobalSearchActive.value &&
+      messages.value.length < totalFolderMessages.value
+  );
+
+  async function loadFolderMessages(
+    folderPath: string,
+    silent = false,
+    preserveLoadedCount = false
+  ) {
     if (!isAuthenticated.value) return;
     isSyncing.value = true;
 
     try {
       const cached = await db.mailHeaders.where('folder').equals(folderPath).toArray();
-      if (cached.length > 0) {
+      if (cached.length > 0 && activeFolderPath.value === folderPath) {
         cached.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         messages.value = cached;
       }
@@ -439,11 +454,16 @@ export const useMailStore = defineStore('mail', () => {
     }
 
     try {
+      const requestLimit = preserveLoadedCount
+        ? Math.min(1000, Math.max(MAIL_PAGE_SIZE, messages.value.length))
+        : MAIL_PAGE_SIZE;
       const res = await fetchFolderMessagesApi({
         folder: folderPath,
-        limit: 120,
+        limit: requestLimit,
         page: 1
       });
+      if (activeFolderPath.value !== folderPath) return;
+
       messages.value = res.messages;
       totalFolderMessages.value = res.total;
 
@@ -459,7 +479,7 @@ export const useMailStore = defineStore('mail', () => {
       const folderObj = folders.value.find((f) => f.path === folderPath);
       if (folderObj) {
         folderObj.totalMessages = res.total;
-        folderObj.unreadMessages = res.messages.filter((m) => !m.seen).length;
+        folderObj.unreadMessages = res.unread;
       }
     } catch (err: any) {
       if (!silent) {
@@ -467,6 +487,56 @@ export const useMailStore = defineStore('mail', () => {
       }
     } finally {
       isSyncing.value = false;
+    }
+  }
+
+  async function loadMoreMessages() {
+    if (!isAuthenticated.value || !hasMoreMessages.value || isLoadingMore.value || isSyncing.value) {
+      return;
+    }
+    const targetFolder = activeFolderPath.value;
+    isLoadingMore.value = true;
+    try {
+      const nextPage = Math.floor(messages.value.length / MAIL_PAGE_SIZE) + 1;
+      const res = await fetchFolderMessagesApi({
+        folder: targetFolder,
+        limit: MAIL_PAGE_SIZE,
+        page: nextPage
+      });
+      if (activeFolderPath.value !== targetFolder) return;
+
+      const byId = new Map<string, MailHeader>();
+      for (const m of messages.value) byId.set(m.id, m);
+      for (const m of res.messages) byId.set(m.id, m);
+
+      const merged = Array.from(byId.values()).sort((a, b) => {
+        const diff = new Date(b.date).getTime() - new Date(a.date).getTime();
+        return diff !== 0 ? diff : b.uid - a.uid;
+      });
+      const grew = merged.length > messages.value.length;
+      messages.value = merged;
+
+      if (res.messages.length === 0 || !grew) {
+        totalFolderMessages.value = merged.length;
+      } else {
+        totalFolderMessages.value = res.total;
+      }
+
+      try {
+        if (res.messages.length > 0) {
+          await db.mailHeaders.bulkPut(toPlainObject(res.messages));
+        }
+      } catch {
+        // Ignorér
+      }
+    } catch (err: any) {
+      notify(
+        'Kunne ikke indlæse flere',
+        err?.message || 'Fejl ved hentning af ældre e-mails.',
+        'error'
+      );
+    } finally {
+      isLoadingMore.value = false;
     }
   }
 
@@ -671,7 +741,7 @@ export const useMailStore = defineStore('mail', () => {
           uids: latest.uids,
           seen: latest.previousSeen
         });
-        await loadFolderMessages(activeFolderPath.value, true);
+        await loadFolderMessages(activeFolderPath.value, true, true);
         notify('Fortrudt (Ctrl+Z)', latest.label, 'info');
       } else if (latest.type === 'TRANSFER' && latest.targetFolder) {
         await selectFolder(latest.targetFolder);
@@ -1444,6 +1514,8 @@ export const useMailStore = defineStore('mail', () => {
     inboxUnreadCount,
     messages,
     totalFolderMessages,
+    isLoadingMore,
+    hasMoreMessages,
     selectedMessageIds,
     selectionAnchorId,
     selectionFocusId,
@@ -1481,6 +1553,7 @@ export const useMailStore = defineStore('mail', () => {
     syncWithServer,
     selectFolder,
     loadFolderMessages,
+    loadMoreMessages,
     runServerSearch,
     openMessage,
     selectMessageRange,

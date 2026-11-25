@@ -352,6 +352,21 @@ function bodyStructureHasAttachments(struct: any): boolean {
   return false;
 }
 
+function parseMessageDate(envDate: unknown, internalDate: unknown): Date {
+  for (const raw of [envDate, internalDate]) {
+    if (raw instanceof Date && !isNaN(raw.getTime())) {
+      return raw;
+    }
+    if (typeof raw === 'string' && raw.trim()) {
+      const parsed = new Date(raw);
+      if (!isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+  }
+  return new Date(0);
+}
+
 /**
  * Henter beskedoversigt (headers/envelopes) for en mappe, nyeste først.
  */
@@ -360,9 +375,10 @@ export async function fetchFolderMessages(
   folderPath: string,
   options?: { limit?: number; page?: number; searchQuery?: string }
 ): Promise<{ messages: MailHeaderDTO[]; total: number; unread: number }> {
-  const limit = Math.min(250, Math.max(20, Number(options?.limit || 100)));
+  const limit = Math.min(1000, Math.max(20, Number(options?.limit || 100)));
   const page = Math.max(1, Number(options?.page || 1));
   const searchQuery = (options?.searchQuery || '').trim();
+  const startIdx = (page - 1) * limit;
 
   return withImap(creds, async (client) => {
     const lock = await client.getMailboxLock(folderPath, { readOnly: true });
@@ -393,14 +409,55 @@ export async function fetchFolderMessages(
         if (uidList.length === 0) {
           return { messages: [], total: 0, unread: 0 };
         }
-        uidList.sort((a, b) => b - a);
-        const startIdx = (page - 1) * limit;
-        rangeOrUids = uidList.slice(startIdx, startIdx + limit);
+        if (uidList.length > limit && uidList.length <= 2000) {
+          const indexed: Array<{ uid: number; ts: number }> = [];
+          for await (const meta of client.fetch(
+            uidList,
+            { uid: true, envelope: true, internalDate: true },
+            { uid: true }
+          )) {
+            indexed.push({
+              uid: meta.uid,
+              ts: parseMessageDate(meta.envelope?.date, meta.internalDate).getTime()
+            });
+          }
+          indexed.sort((a, b) => b.ts - a.ts || b.uid - a.uid);
+          rangeOrUids = indexed.slice(startIdx, startIdx + limit).map((e) => e.uid);
+        } else {
+          uidList.sort((a, b) => b - a);
+          rangeOrUids = uidList.slice(startIdx, startIdx + limit);
+        }
         useUidFetch = true;
       } else {
-        const endSeq = Math.max(1, total - (page - 1) * limit);
-        const startSeq = Math.max(1, endSeq - limit + 1);
-        rangeOrUids = `${startSeq}:${endSeq}`;
+        if (startIdx >= total) {
+          const unseenUids = await client.search({ seen: false }, { uid: true });
+          const unread = Array.isArray(unseenUids) ? unseenUids.length : 0;
+          return { messages: [], total, unread };
+        }
+        if (total <= limit && page === 1) {
+          rangeOrUids = '1:*';
+          useUidFetch = false;
+        } else if (total <= 10000) {
+          // Byg letvægts dato-indeks så mapper hvor ældre mails har høje sekvensnumre sorteres efter reel Date
+          const dateIndex: Array<{ uid: number; ts: number }> = [];
+          for await (const meta of client.fetch(
+            '1:*',
+            { uid: true, envelope: true, internalDate: true },
+            { uid: false }
+          )) {
+            dateIndex.push({
+              uid: meta.uid,
+              ts: parseMessageDate(meta.envelope?.date, meta.internalDate).getTime()
+            });
+          }
+          dateIndex.sort((a, b) => b.ts - a.ts || b.uid - a.uid);
+          rangeOrUids = dateIndex.slice(startIdx, startIdx + limit).map((e) => e.uid);
+          useUidFetch = true;
+        } else {
+          const endSeq = Math.max(1, total - startIdx);
+          const startSeq = Math.max(1, endSeq - limit + 1);
+          rangeOrUids = `${startSeq}:${endSeq}`;
+        }
       }
 
       if (Array.isArray(rangeOrUids) && rangeOrUids.length === 0) {
@@ -422,11 +479,7 @@ export async function fetchFolderMessages(
       )) {
         const env = msg.envelope || {};
         const flags = msg.flags || new Set<string>();
-        const dateObj = env.date || msg.internalDate || new Date();
-        const isoDate =
-          dateObj instanceof Date && !isNaN(dateObj.getTime())
-            ? dateObj.toISOString()
-            : new Date().toISOString();
+        const isoDate = parseMessageDate(env.date, msg.internalDate).toISOString();
 
         items.push({
           uid: msg.uid,
@@ -446,8 +499,18 @@ export async function fetchFolderMessages(
         });
       }
 
-      items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      const unreadCount = items.filter((m) => !m.seen).length;
+      items.sort((a, b) => {
+        const diff = new Date(b.date).getTime() - new Date(a.date).getTime();
+        return diff !== 0 ? diff : b.uid - a.uid;
+      });
+
+      let unreadCount = items.filter((m) => !m.seen).length;
+      if (!searchQuery && total > items.length) {
+        const unseenUids = await client.search({ seen: false }, { uid: true });
+        if (Array.isArray(unseenUids)) {
+          unreadCount = unseenUids.length;
+        }
+      }
 
       return {
         messages: items,

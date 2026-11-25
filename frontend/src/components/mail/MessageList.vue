@@ -156,8 +156,19 @@ function formatSmartDate(iso: string): string {
         <h2 class="text-xs font-bold text-slate-100 truncate">
           {{ store.searchQuery.trim() ? 'Søgeresultater (Alle mapper)' : (store.activeFolder?.name || store.activeFolderPath) }}
         </h2>
-        <span class="text-[11px] text-slate-400">
-          ({{ store.filteredMessages.length }})
+        <span class="text-[11px] text-slate-400 whitespace-nowrap">
+          <template
+            v-if="
+              !store.searchQuery.trim() &&
+              store.filterMode === 'ALL' &&
+              store.totalFolderMessages > store.filteredMessages.length
+            "
+          >
+            ({{ store.filteredMessages.length }} af {{ store.totalFolderMessages }})
+          </template>
+          <template v-else>
+            ({{ store.filteredMessages.length }})
+          </template>
         </span>
         <span
           v-if="store.selectedMessageIds.length > 1"
@@ -342,6 +353,21 @@ function formatSmartDate(iso: string): string {
             {{ msg.subject }}
           </div>
         </div>
+      </div>
+
+      <div v-if="store.hasMoreMessages" class="p-3 flex justify-center">
+        <button
+          type="button"
+          :disabled="store.isLoadingMore || store.isSyncing"
+          class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-200 disabled:opacity-50 transition"
+          @click="store.loadMoreMessages()"
+        >
+          {{
+            store.isLoadingMore
+              ? 'Indlæser flere e-mails...'
+              : `Indlæs flere (viser ${store.messages.length} af ${store.totalFolderMessages})`
+          }}
+        </button>
       </div>
     </div>
   </section>
