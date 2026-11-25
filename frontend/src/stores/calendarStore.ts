@@ -289,7 +289,8 @@ export const useCalendarStore = defineStore('calendar', () => {
 
     const appendRecurringSpecialDate = (
       contactUid: string,
-      contactName: string,
+      displayFirstName: string,
+      fullName: string,
       rawDate: string | undefined,
       kindKey: 'birthday' | 'anniversary',
       icon: string,
@@ -309,17 +310,17 @@ export const useCalendarStore = defineStore('calendar', () => {
         const endYmd = addDaysToDateOnly(startYmd, 1);
         const diffYears = y - originYear;
         const yearsSuffix =
-          originYear >= 1900 && diffYears >= 0 && diffYears <= 130 ? ` (${diffYears} år)` : '';
+          originYear >= 1900 && diffYears > 0 && diffYears <= 130 ? ` (${diffYears} år)` : '';
 
         const title =
           kindKey === 'birthday'
-            ? `${icon} ${contactName}${yearsSuffix}`
-            : `${icon} ${contactName} – ${customLabel || 'Bryllupsdag'}${yearsSuffix}`;
+            ? `${icon} ${displayFirstName}${yearsSuffix}`
+            : `${icon} ${displayFirstName} – ${customLabel || 'Bryllupsdag'}${yearsSuffix}`;
 
         const description =
           kindKey === 'birthday'
-            ? `Fødselsdag for ${contactName} (fra Brogaard Kontakter)`
-            : `${customLabel || 'Bryllupsdag'} for ${contactName} (fra Brogaard Kontakter)`;
+            ? `Fødselsdag for ${fullName} (fra Brogaard Kontakter)`
+            : `${customLabel || 'Bryllupsdag'} for ${fullName} (fra Brogaard Kontakter)`;
 
         result.push({
           id: `${BIRTHDAY_CALENDAR_ID}::${kindKey}::${contactUid}::${y}`,
@@ -339,9 +340,21 @@ export const useCalendarStore = defineStore('calendar', () => {
     };
 
     for (const contact of contactsStore.contacts) {
-      appendRecurringSpecialDate(contact.uid, contact.fullName, contact.birthday, 'birthday', '🎂');
+      const firstName =
+        contact.firstName?.trim().split(/\s+/).filter(Boolean)[0] ||
+        contact.fullName?.trim().split(/\s+/).filter(Boolean)[0] ||
+        'Kontakt';
       appendRecurringSpecialDate(
         contact.uid,
+        firstName,
+        contact.fullName,
+        contact.birthday,
+        'birthday',
+        '🎂'
+      );
+      appendRecurringSpecialDate(
+        contact.uid,
+        firstName,
         contact.fullName,
         contact.anniversary,
         'anniversary',

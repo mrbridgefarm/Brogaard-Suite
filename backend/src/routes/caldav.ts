@@ -83,7 +83,8 @@ import {
 import {
   isBrogaardBirthdayCalendarUrl,
   syncContactBirthdaysToCalDav,
-  disableContactBirthdaysCalDavSync
+  disableContactBirthdaysCalDavSync,
+  maybeAutoSyncContactBirthdays
 } from '../services/birthdayCaldavSync.js';
 import {
   addUserSubscription,
@@ -197,6 +198,8 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
     const activeIncomingKeys = new Set(
       incomingShares.map((item) => canonicalCalKey(item.share.calendarUrl))
     );
+
+    await maybeAutoSyncContactBirthdays(creds);
 
     const [caldavCalendars, subData] = await Promise.all([
       fetchCalendars(creds),

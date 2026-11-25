@@ -13,7 +13,10 @@ import {
 } from '../services/carddavClient.js';
 import { normalizeDanishText } from '../services/icalMapper.js';
 import { updateCalDavCalendarColor } from '../services/davClient.js';
-import { syncContactBirthdaysToCalDav } from '../services/birthdayCaldavSync.js';
+import {
+  syncContactBirthdaysToCalDav,
+  maybeAutoSyncContactBirthdays
+} from '../services/birthdayCaldavSync.js';
 import { requireDavCredentials } from '../services/sessionAuth.js';
 import {
   canonicalContactPrefKey,
@@ -69,6 +72,7 @@ carddavRouter.post('/sync', async (req: Request, res: Response) => {
     const rawContacts = await fetchAllContacts(creds, addressBooks);
     const contacts = applyFavoritePrefsToContacts(creds.username, rawContacts);
     const prefs = getUserContactPrefs(creds.username);
+    void maybeAutoSyncContactBirthdays(creds);
 
     sendCompressedJson(req, res, {
       ok: true,

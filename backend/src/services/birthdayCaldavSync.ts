@@ -50,6 +50,17 @@ export function isBrogaardBirthdayCalendarUrl(calUrl: string, savedUrl?: string)
   }
 }
 
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function extractFirstName(firstName?: string, fullName?: string): string {
+  const fromFirst = (firstName || '').trim().split(/\s+/).filter(Boolean)[0];
+  if (fromFirst) return fromFirst;
+  const fromFull = (fullName || '').trim().split(/\s+/).filter(Boolean)[0];
+  return fromFull || 'Kontakt';
+}
+
 function addOneDayDateOnly(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d + 1));
@@ -70,81 +81,91 @@ interface DesiredBirthdayEvent {
   ics: string;
 }
 
-function buildSpecialDateIcs(params: {
-  uid: string;
-  contactName: string;
+function buildRollingSpecialDateEvents(params: {
+  uidPrefix: string;
+  firstName: string;
+  fullName: string;
   rawDate: string;
   kind: 'birthday' | 'anniversary';
   customLabel?: string;
-}): DesiredBirthdayEvent | null {
+}): DesiredBirthdayEvent[] {
   const match = params.rawDate.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!match) return null;
+  if (!match) return [];
 
   const parsedYear = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return [];
 
-  const hasOriginYear = parsedYear >= 1900 && parsedYear <= new Date().getFullYear() + 5;
-  const startYear = hasOriginYear ? parsedYear : new Date().getFullYear();
-  const startYmd = `${String(startYear).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  const endYmd = addOneDayDateOnly(startYmd);
-
+  const currentYear = new Date().getFullYear();
+  const hasOriginYear = parsedYear >= 1900 && parsedYear <= currentYear + 5;
   const label = (params.customLabel || 'Bryllupsdag').trim() || 'Bryllupsdag';
-  const summary =
-    params.kind === 'birthday'
-      ? `🎂 ${params.contactName}${hasOriginYear ? ` (f. ${parsedYear})` : ''}`
-      : `💍 ${params.contactName} – ${label}${hasOriginYear ? ` (siden ${parsedYear})` : ''}`;
+  const formattedOriginDate = `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}-${hasOriginYear ? parsedYear : ''}`.replace(/-$/, '');
 
-  const description =
-    params.kind === 'birthday'
-      ? `Fødselsdag for ${params.contactName} (synkroniseret automatisk fra Brogaard Kontakter).`
-      : `${label} for ${params.contactName} (synkroniseret automatisk fra Brogaard Kontakter).`;
+  const events: DesiredBirthdayEvent[] = [];
+  for (let y = currentYear - 1; y <= currentYear + 5; y++) {
+    const effDay = month === 2 && day === 29 && !isLeapYear(y) ? 28 : day;
+    const startYmd = `${String(y).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(effDay).padStart(2, '0')}`;
+    const endYmd = addOneDayDateOnly(startYmd);
 
-  const hashPayload = JSON.stringify({
-    uid: params.uid,
-    kind: params.kind,
-    name: params.contactName,
-    label: params.kind === 'anniversary' ? label : '',
-    startYmd,
-    originYear: hasOriginYear ? parsedYear : 0
-  });
-  const hash = crypto.createHash('sha256').update(hashPayload, 'utf8').digest('hex').slice(0, 16);
+    const diffYears = hasOriginYear ? y - parsedYear : -1;
+    const yearsSuffix = diffYears > 0 && diffYears <= 130 ? ` (${diffYears} år)` : '';
 
-  const vcalendar = new ICAL.Component(['vcalendar', [], []]);
-  vcalendar.updatePropertyWithValue('prodid', '-//Brogaard Suite//Kontakt Kalender Sync//DA');
-  vcalendar.updatePropertyWithValue('version', '2.0');
-  vcalendar.updatePropertyWithValue('calscale', 'GREGORIAN');
+    const summary =
+      params.kind === 'birthday'
+        ? `🎂 ${params.firstName}${yearsSuffix}`
+        : `💍 ${params.firstName} – ${label}${yearsSuffix}`;
 
-  const vevent = new ICAL.Component('vevent');
-  const nowStamp = ICAL.Time.fromJSDate(new Date(), true);
-  vevent.updatePropertyWithValue('uid', params.uid);
-  vevent.updatePropertyWithValue('dtstamp', nowStamp);
-  vevent.updatePropertyWithValue('last-modified', nowStamp);
-  vevent.updatePropertyWithValue('dtstart', ICAL.Time.fromDateString(startYmd));
-  vevent.updatePropertyWithValue('dtend', ICAL.Time.fromDateString(endYmd));
-  vevent.updatePropertyWithValue('rrule', ICAL.Recur.fromString('FREQ=YEARLY'));
-  vevent.updatePropertyWithValue('summary', summary);
-  vevent.updatePropertyWithValue('description', description);
-  vevent.updatePropertyWithValue('transp', 'TRANSPARENT');
-  vevent.updatePropertyWithValue('categories', params.kind === 'birthday' ? 'Fødselsdag' : 'Mærkedag');
-  vevent.updatePropertyWithValue('x-brogaard-managed', 'TRUE');
-  vevent.updatePropertyWithValue('x-brogaard-kind', params.kind);
-  vevent.updatePropertyWithValue('x-brogaard-name', params.contactName);
-  if (params.kind === 'anniversary') {
-    vevent.updatePropertyWithValue('x-brogaard-label', label);
+    const description =
+      params.kind === 'birthday'
+        ? `Fødselsdag for ${params.fullName}${hasOriginYear ? ` (${formattedOriginDate})` : ''} — auto-synkroniseret fra Brogaard Kontakter.`
+        : `${label} for ${params.fullName}${hasOriginYear ? ` (${formattedOriginDate})` : ''} — auto-synkroniseret fra Brogaard Kontakter.`;
+
+    const uid = `${params.uidPrefix}-${y}`;
+    const hashPayload = JSON.stringify({
+      uid,
+      summary,
+      description,
+      startYmd
+    });
+    const hash = crypto.createHash('sha256').update(hashPayload, 'utf8').digest('hex').slice(0, 16);
+
+    const vcalendar = new ICAL.Component(['vcalendar', [], []]);
+    vcalendar.updatePropertyWithValue('prodid', '-//Brogaard Suite//Kontakt Kalender Sync//DA');
+    vcalendar.updatePropertyWithValue('version', '2.0');
+    vcalendar.updatePropertyWithValue('calscale', 'GREGORIAN');
+
+    const vevent = new ICAL.Component('vevent');
+    const nowStamp = ICAL.Time.fromJSDate(new Date(), true);
+    vevent.updatePropertyWithValue('uid', uid);
+    vevent.updatePropertyWithValue('dtstamp', nowStamp);
+    vevent.updatePropertyWithValue('last-modified', nowStamp);
+    vevent.updatePropertyWithValue('dtstart', ICAL.Time.fromDateString(startYmd));
+    vevent.updatePropertyWithValue('dtend', ICAL.Time.fromDateString(endYmd));
+    vevent.updatePropertyWithValue('summary', summary);
+    vevent.updatePropertyWithValue('description', description);
+    vevent.updatePropertyWithValue('transp', 'TRANSPARENT');
+    vevent.updatePropertyWithValue('categories', params.kind === 'birthday' ? 'Fødselsdag' : 'Mærkedag');
+    vevent.updatePropertyWithValue('x-brogaard-managed', 'TRUE');
+    vevent.updatePropertyWithValue('x-brogaard-kind', params.kind);
+    vevent.updatePropertyWithValue('x-brogaard-name', params.fullName);
+    if (params.kind === 'anniversary') {
+      vevent.updatePropertyWithValue('x-brogaard-label', label);
+    }
+    if (hasOriginYear) {
+      vevent.updatePropertyWithValue('x-brogaard-origin-year', String(parsedYear));
+    }
+    vevent.updatePropertyWithValue('x-brogaard-hash', hash);
+
+    vcalendar.addSubcomponent(vevent);
+    events.push({
+      uid,
+      hash,
+      ics: vcalendar.toString()
+    });
   }
-  if (hasOriginYear) {
-    vevent.updatePropertyWithValue('x-brogaard-origin-year', String(parsedYear));
-  }
-  vevent.updatePropertyWithValue('x-brogaard-hash', hash);
 
-  vcalendar.addSubcomponent(vevent);
-  return {
-    uid: params.uid,
-    hash,
-    ics: vcalendar.toString()
-  };
+  return events;
 }
 
 async function ensureBirthdayCalDavCalendar(
@@ -315,31 +336,40 @@ export async function syncContactBirthdaysToCalDav(
   const contacts = await fetchAllContacts(creds, addressBooks);
 
   const desired = new Map<string, DesiredBirthdayEvent>();
+  let uniqueSpecialDates = 0;
   for (const c of contacts) {
     const baseUid = sanitizeUidSegment(c.uid || c.id || c.fullName || 'contact');
-    const name = (c.fullName || [c.firstName, c.lastName].filter(Boolean).join(' ')).trim() || 'Kontakt';
+    const fullName =
+      (c.fullName || [c.firstName, c.lastName].filter(Boolean).join(' ')).trim() || 'Kontakt';
+    const firstName = extractFirstName(c.firstName, fullName);
 
     if (c.birthday) {
-      const bdayUid = `brogaard-bday-${baseUid}`;
-      const built = buildSpecialDateIcs({
-        uid: bdayUid,
-        contactName: name,
+      const builtList = buildRollingSpecialDateEvents({
+        uidPrefix: `brogaard-bday-${baseUid}`,
+        firstName,
+        fullName,
         rawDate: c.birthday,
         kind: 'birthday'
       });
-      if (built) desired.set(bdayUid, built);
+      if (builtList.length > 0) uniqueSpecialDates += 1;
+      for (const item of builtList) {
+        desired.set(item.uid, item);
+      }
     }
 
     if (c.anniversary) {
-      const annivUid = `brogaard-anniv-${baseUid}`;
-      const built = buildSpecialDateIcs({
-        uid: annivUid,
-        contactName: name,
+      const builtList = buildRollingSpecialDateEvents({
+        uidPrefix: `brogaard-anniv-${baseUid}`,
+        firstName,
+        fullName,
         rawDate: c.anniversary,
         kind: 'anniversary',
         customLabel: c.anniversaryLabel
       });
-      if (built) desired.set(annivUid, built);
+      if (builtList.length > 0) uniqueSpecialDates += 1;
+      for (const item of builtList) {
+        desired.set(item.uid, item);
+      }
     }
   }
 
@@ -417,12 +447,44 @@ export async function syncContactBirthdaysToCalDav(
   return {
     synced: true,
     calendarUrl: calUrl,
-    totalContactsEvents: desired.size,
+    totalContactsEvents: uniqueSpecialDates,
     createdOrUpdated,
     deleted,
     unchanged,
     lastSyncedAt: nowIso
   };
+}
+
+const autoSyncInFlight = new Set<string>();
+
+export async function maybeAutoSyncContactBirthdays(
+  creds: CalDavCredentials,
+  minIntervalMs = 10 * 60 * 1000
+): Promise<void> {
+  const userKey = creds.username.toLowerCase().trim();
+  const prefs = getUserContactPrefs(creds.username);
+  if (!prefs.birthdayCalendarSyncEnabled || autoSyncInFlight.has(userKey)) {
+    return;
+  }
+
+  const lastMs = prefs.birthdayCalendarLastSyncedAt
+    ? new Date(prefs.birthdayCalendarLastSyncedAt).getTime()
+    : 0;
+  const lastYear = lastMs > 0 ? new Date(lastMs).getFullYear() : 0;
+  const currentYear = new Date().getFullYear();
+
+  if (lastMs > 0 && lastYear === currentYear && Date.now() - lastMs < minIntervalMs) {
+    return;
+  }
+
+  autoSyncInFlight.add(userKey);
+  try {
+    await syncContactBirthdaysToCalDav(creds);
+  } catch (err: any) {
+    console.warn('Auto-synk af fødselsdagskalender fejlede:', err?.message || err);
+  } finally {
+    autoSyncInFlight.delete(userKey);
+  }
 }
 
 export async function disableContactBirthdaysCalDavSync(

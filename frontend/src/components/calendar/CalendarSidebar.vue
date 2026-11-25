@@ -680,21 +680,14 @@ function removeSingleClipboardEvent(evId: string) {
                       {{ cal.name }}
                     </span>
                     <span
-                      v-if="cal.isContactBirthdays"
-                      class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[9px] font-semibold shrink-0"
-                      title="Synkroniseres til Mailcow CalDAV (telefon &amp; Thunderbird)"
-                    >
-                      Mailcow-synk
-                    </span>
-                    <span
-                      v-else-if="cal.isSubscribed || cal.id.startsWith('sub::')"
+                      v-if="cal.isSubscribed || cal.id.startsWith('sub::')"
                       class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[9px] font-semibold shrink-0"
                       title="Abonneret kalender (opdateres automatisk, skrivebeskyttet)"
                     >
                       <Rss class="w-2.5 h-2.5" />
                     </span>
                     <span
-                      v-else-if="cal.readOnly"
+                      v-else-if="cal.readOnly && !cal.isContactBirthdays"
                       class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[9px] font-semibold shrink-0"
                       title="Skrivebeskyttet kalender (Read-Only)"
                     >
@@ -708,8 +701,8 @@ function removeSingleClipboardEvent(evId: string) {
                       <Users class="w-2.5 h-2.5" />
                     </span>
                   </div>
-                  <div v-if="cal.isContactBirthdays" class="text-[10px] text-emerald-300/80 truncate">
-                    Fra Kontakter • Synkes til telefon &amp; PC
+                  <div v-if="cal.isContactBirthdays" class="text-[10px] text-slate-400 truncate">
+                    Auto-synk fra Kontakter
                   </div>
                   <div v-else-if="cal.isSubscribed || cal.id.startsWith('sub::')" class="text-[10px] text-slate-400 truncate">
                     {{ cal.owner || 'Kalender-abonnement' }}
@@ -965,8 +958,8 @@ function removeSingleClipboardEvent(evId: string) {
               <span class="truncate">
                 {{
                   store.isSyncingBirthdaysToMailcow
-                    ? 'Synkroniserer til Mailcow...'
-                    : 'Synk til Mailcow (telefon / Thunderbird)'
+                    ? 'Synkroniserer...'
+                    : 'Sync til Mailcow'
                 }}
               </span>
             </button>
