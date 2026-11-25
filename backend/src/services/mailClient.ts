@@ -1,6 +1,6 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
-import nodemailer from 'nodemailer';
+import nodemailer, { type SendMailOptions } from 'nodemailer';
 import net from 'node:net';
 
 export interface MailServerCredentials {
@@ -985,7 +985,7 @@ export async function deleteImapFolder(creds: MailServerCredentials, folderPath:
   });
 }
 
-function buildMailOptions(payload: SendMailPayload): nodemailer.SendMailOptions {
+function buildMailOptions(payload: SendMailPayload): SendMailOptions {
   const fromFormatted = payload.fromName?.trim()
     ? `"${payload.fromName.trim().replace(/"/g, '\\"')}" <${payload.fromEmail.trim()}>`
     : payload.fromEmail.trim();
@@ -1014,7 +1014,7 @@ function buildMailOptions(payload: SendMailPayload): nodemailer.SendMailOptions 
  * Kompilerer en komplet RFC 5322 rå MIME-besked via Nodemailers indbyggede buffer-streamTransport
  * (undgår direkte dybe imports i nodemailer/lib/*, så det virker på tværs af alle Nodemailer-versioner).
  */
-async function buildRawMimeBuffer(options: nodemailer.SendMailOptions): Promise<Buffer> {
+async function buildRawMimeBuffer(options: SendMailOptions): Promise<Buffer> {
   const rawTransporter = nodemailer.createTransport({
     streamTransport: true,
     buffer: true,

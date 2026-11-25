@@ -33,7 +33,7 @@ Når Mail, Kalender og Kontakter bor under samme tag med ét fælles login, arbe
 * **DOMPurify HTML-Sanitering & Tracking-kontrol:** Indgående HTML-mails renses strengt mod XSS (`<script>`, `<iframe>`, `<object>`, `<form>` fjernes) før visning, og eksterne billeder kan skjules/vises med ét klik.
 * **SSRF- & Origin-validering:** Mail-, CalDAV-, CardDAV- og abonnementskald valideres mod lokale loopback-, link-local- og cloud-metadata-adresser. Offentlige kalenderdelingslinks (`?share=<token>`) er låst til udelukkende at læse fra ejerens autentificerede server.
 * **Rate Limiting & OWASP Headers:** Brute-force-beskyttelse på login, mail-afsendelse og offentlige delingslinks, samt streng Content Security Policy (`CSP`), `X-Frame-Options: DENY` og `Referrer-Policy: no-referrer`.
-* **Container-sikkerhed:** Minimal Alpine Linux (`node:24-alpine`) med opdaterede OS-pakker, uden `npm`/`yarn`/`corepack` i runtime-imaget, afviklet under uprivilegeret bruger (`USER node`).
+* **Container-sikkerhed:** Minimal Alpine Linux (`node:26-alpine`) med opdaterede OS-pakker, uden `npm`/`yarn`/`corepack` i runtime-imaget, afviklet under uprivilegeret bruger (`USER node`).
 
 ---
 
@@ -136,5 +136,5 @@ docker compose restart php-fpm-mailcow
 
 ## 🛠️ Teknologisk Stack
 
-* **Frontend:** Vue 3 (Composition API) + TypeScript + Vite 6 + Tailwind CSS + Pinia + Dexie.js (IndexedDB) + VitePWA + FullCalendar (`dayGrid`, `timeGrid`, `list`, `interaction`) + specialbygget `YearView` + DOMPurify.
-* **Backend:** Node.js 24 + Express 5 + TypeScript + `imapflow` + `mailparser` + `nodemailer` + ManageSieve (`node:net`/`node:tls`) + `tsdav` + `ical.js` + direkte CalDAV/CardDAV XML & vCard 3.0 engine.
+* **Frontend:** Vue 3 (Composition API) + TypeScript + Vite 8 + Tailwind CSS + Pinia + Dexie.js (IndexedDB) + VitePWA + FullCalendar (`dayGrid`, `timeGrid`, `list`, `interaction`) + specialbygget `YearView` + DOMPurify.
+* **Backend:** Node.js 26 LTS + Express 5 + TypeScript + `imapflow` + `mailparser` + `nodemailer` + ManageSieve (`node:net`/`node:tls`) + `tsdav` + `ical.js` + direkte CalDAV/CardDAV XML & vCard 3.0 engine.

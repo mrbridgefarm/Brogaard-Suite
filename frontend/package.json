@@ -15,10 +15,11 @@
     "@fullcalendar/list": "^6.1.22",
     "@fullcalendar/timegrid": "^6.1.22",
     "@fullcalendar/vue3": "^6.1.22",
+    "@vue/devtools-api": "^8.2.1",
     "dexie": "^4.4.7",
     "dompurify": "^3.5.0",
-    "lucide-vue-next": "^0.577.0",
-    "pinia": "^3.0.4",
+    "lucide-vue-next": "^1.0.0",
+    "pinia": "^4.1.0",
     "vue": "^3.5.46"
   },
   "devDependencies": {
@@ -27,7 +28,7 @@
     "postcss": "^8.5.33",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",
-    "vite": "^6.4.6",
+    "vite": "^8.3.8",
     "vite-plugin-pwa": "^2.0.0"
   },
   "overrides": {

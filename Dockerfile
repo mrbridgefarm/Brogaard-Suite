@@ -7,7 +7,7 @@
 # ------------------------------------------------------------------------------
 # Stage 1: Build Frontend (Nativt på build-serveren)
 # ------------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 COPY frontend/package.json ./
@@ -19,7 +19,7 @@ RUN npm run build
 # ------------------------------------------------------------------------------
 # Stage 2: Build Backend & Prod node_modules (Ren JS - arkitekturuafhængig)
 # ------------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM node:24-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine AS backend-builder
 WORKDIR /app/backend
 
 COPY backend/package.json ./
@@ -32,7 +32,7 @@ RUN npm run build && npm prune --omit=dev
 # Stage 3: Production Runtime (Target arkitektur: linux/amd64 eller linux/arm64)
 # CVE-hærdet: Opgraderer alle Alpine OS-pakker og fjerner npm/corepack/yarn.
 # ------------------------------------------------------------------------------
-FROM node:24-alpine AS runtime
+FROM node:26-alpine AS runtime
 WORKDIR /app
 
 RUN apk update && apk upgrade --no-cache && \
