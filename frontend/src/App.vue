@@ -201,6 +201,12 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
     if (isCtrlOrMeta && key === 'n') {
       e.preventDefault();
       contactsStore.openCreateContactModal();
+    } else if (!isCtrlOrMeta && e.key === 'ArrowDown') {
+      e.preventDefault();
+      contactsStore.navigateSelection(1);
+    } else if (!isCtrlOrMeta && e.key === 'ArrowUp') {
+      e.preventDefault();
+      contactsStore.navigateSelection(-1);
     }
   }
 }

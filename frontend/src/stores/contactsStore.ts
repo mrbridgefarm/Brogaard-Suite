@@ -501,6 +501,25 @@ export const useContactsStore = defineStore('contacts', () => {
     return results;
   }
 
+  function navigateSelection(delta: 1 | -1) {
+    const list = filteredContacts.value;
+    if (list.length === 0) return;
+
+    const currentIdx = selectedContactId.value
+      ? list.findIndex((c) => c.id === selectedContactId.value)
+      : -1;
+    const nextIdx =
+      currentIdx === -1
+        ? delta > 0
+          ? 0
+          : list.length - 1
+        : Math.max(0, Math.min(list.length - 1, currentIdx + delta));
+    const target = list[nextIdx];
+    if (target) {
+      selectedContactId.value = target.id;
+    }
+  }
+
   function resetState() {
     addressBooks.value = [];
     contacts.value = [];
@@ -522,6 +541,7 @@ export const useContactsStore = defineStore('contacts', () => {
     selectedCategory,
     searchQuery,
     selectedContactId,
+    navigateSelection,
     editingContact,
     isContactModalOpen,
     writableAddressBooks,

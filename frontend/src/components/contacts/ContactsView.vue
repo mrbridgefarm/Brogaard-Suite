@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 import {
   Users,
   Star,
@@ -44,6 +44,22 @@ const listWidth = ref<number>(
   Math.min(520, Math.max(260, Number(localStorage.getItem(LIST_WIDTH_KEY)) || 340))
 );
 const isResizing = ref(false);
+const listScrollRef = ref<HTMLElement | null>(null);
+
+watch(
+  () => store.selectedContactId,
+  async (contactId) => {
+    if (!contactId || !listScrollRef.value) return;
+    await nextTick();
+    const rows = listScrollRef.value.querySelectorAll<HTMLElement>('[data-contact-row-id]');
+    for (const row of rows) {
+      if (row.dataset.contactRowId === contactId) {
+        row.scrollIntoView({ block: 'nearest' });
+        break;
+      }
+    }
+  }
+);
 
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value;
@@ -474,10 +490,11 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
           </button>
         </div>
 
-        <div v-else class="flex-1 overflow-y-auto divide-y divide-white/5">
+        <div v-else ref="listScrollRef" class="flex-1 overflow-y-auto divide-y divide-white/5">
           <div
             v-for="contact in store.filteredContacts"
             :key="contact.id"
+            :data-contact-row-id="contact.id"
             role="button"
             tabindex="0"
             class="group w-full px-3.5 py-2.5 text-left flex items-center gap-3 transition cursor-pointer focus:outline-none"
