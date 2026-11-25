@@ -55,7 +55,9 @@ const NAME_OVERRIDE_KEY = 'dav_sync_cal_name_overrides_v1';
 const HIDDEN_CAL_KEY = 'dav_sync_cal_hidden_calendars_v1';
 const SUBSCRIPTIONS_STORAGE_KEY = 'dav_sync_cal_subscriptions_v1';
 const SHOW_BIRTHDAYS_KEY = 'brogaard_suite_show_birthdays_v1';
+const AUTO_REFRESH_KEY = 'dav_sync_cal_auto_refresh_min_v1';
 export const BIRTHDAY_CALENDAR_ID = 'builtin::contact-birthdays';
+export type CalendarAutoRefreshMinutes = 0 | 1 | 2 | 5 | 10;
 
 function loadHiddenCalendarIds(): string[] {
   try {
@@ -111,6 +113,19 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   const isSyncing = ref<boolean>(false);
   const lastSyncedAt = ref<string | null>(null);
+
+  const savedRefresh = Number(localStorage.getItem(AUTO_REFRESH_KEY));
+  const autoRefreshMinutes = ref<CalendarAutoRefreshMinutes>(
+    savedRefresh === 0 ||
+      savedRefresh === 1 ||
+      savedRefresh === 2 ||
+      savedRefresh === 5 ||
+      savedRefresh === 10
+      ? (savedRefresh as CalendarAutoRefreshMinutes)
+      : 2
+  );
+  let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let visibilityListenerBound = false;
 
   const currentView = ref<CalendarViewType>('dayGridMonth');
   const selectedEventIds = ref<string[]>([]);
@@ -438,6 +453,64 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
   }
 
+  function setupAutoRefreshTimer() {
+    if (autoRefreshTimer) {
+      clearInterval(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
+    if (typeof window === 'undefined') return;
+
+    if (!visibilityListenerBound && typeof document !== 'undefined') {
+      visibilityListenerBound = true;
+      document.addEventListener('visibilitychange', () => {
+        if (
+          document.visibilityState === 'visible' &&
+          autoRefreshMinutes.value > 0 &&
+          isAuthenticated.value &&
+          !isPublicShareMode.value &&
+          isOnline.value &&
+          !isSyncing.value &&
+          !isEventModalOpen.value
+        ) {
+          const lastMs = lastSyncedAt.value ? new Date(lastSyncedAt.value).getTime() : 0;
+          if (!lastMs || Date.now() - lastMs >= 60_000) {
+            void syncWithServer(true);
+          }
+        }
+      });
+    }
+
+    if (autoRefreshMinutes.value > 0) {
+      const intervalMs = autoRefreshMinutes.value * 60 * 1000;
+      autoRefreshTimer = setInterval(() => {
+        if (
+          isAuthenticated.value &&
+          !isPublicShareMode.value &&
+          isOnline.value &&
+          !isSyncing.value &&
+          !isEventModalOpen.value
+        ) {
+          void syncWithServer(true);
+        }
+      }, intervalMs);
+    }
+  }
+
+  function setAutoRefreshMinutes(minutes: CalendarAutoRefreshMinutes) {
+    autoRefreshMinutes.value = minutes;
+    localStorage.setItem(AUTO_REFRESH_KEY, String(minutes));
+    setupAutoRefreshTimer();
+    if (minutes === 0) {
+      notify('Auto-opdatering slået fra', 'Kalendere opdateres nu kun ved manuelt klik.', 'info');
+    } else {
+      notify(
+        'Auto-opdatering aktiv',
+        `Synkroniserer automatisk kalendere hvert ${minutes}. minut.`,
+        'success'
+      );
+    }
+  }
+
   async function hydrateSession(user: string) {
     session.value = {
       mode: 'CALDAV',
@@ -467,6 +540,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
 
     startReminderWatcher(() => visibleEvents.value);
+    setupAutoRefreshTimer();
 
     if (isOnline.value) {
       void flushSyncQueue().then(() => syncWithServer(true));
@@ -508,10 +582,15 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
 
     startReminderWatcher(() => visibleEvents.value);
+    setupAutoRefreshTimer();
     void syncWithServer(true);
   }
 
   function resetState() {
+    if (autoRefreshTimer) {
+      clearInterval(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
     session.value = null;
     localStorage.removeItem(NAME_OVERRIDE_KEY);
     clearClipboard();
@@ -2609,6 +2688,8 @@ export const useCalendarStore = defineStore('calendar', () => {
     isOnline,
     isSyncing,
     lastSyncedAt,
+    autoRefreshMinutes,
+    setAutoRefreshMinutes,
     currentView,
     selectedEventIds,
     selectedDateStr,

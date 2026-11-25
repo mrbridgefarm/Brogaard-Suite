@@ -18,9 +18,11 @@ import {
   PanelLeftOpen,
   Keyboard,
   ShieldCheck,
-  Pencil
+  Pencil,
+  Clock,
+  Check
 } from 'lucide-vue-next';
-import { useCalendarStore } from '../../stores/calendarStore';
+import { useCalendarStore, type CalendarAutoRefreshMinutes } from '../../stores/calendarStore';
 import { useTheme } from '../../composables/useTheme';
 import ThemePicker from '../shared/ThemePicker.vue';
 import SuiteModuleSwitcher from '../shared/SuiteModuleSwitcher.vue';
@@ -45,6 +47,22 @@ const store = useCalendarStore();
 const { currentTheme } = useTheme();
 const isSearchFocused = ref(false);
 const isHelpOpen = ref(false);
+const isSyncMenuOpen = ref(false);
+
+const refreshOptions: Array<{ label: string; value: CalendarAutoRefreshMinutes }> = [
+  { label: 'Hvert 1. minut', value: 1 },
+  { label: 'Hvert 2. minut (Standard)', value: 2 },
+  { label: 'Hvert 5. minut', value: 5 },
+  { label: 'Hvert 10. minut', value: 10 },
+  { label: 'Kun manuelt', value: 0 }
+];
+
+const formattedLastSyncedAt = computed(() => {
+  if (!store.lastSyncedAt) return '';
+  const dt = new Date(store.lastSyncedAt);
+  if (isNaN(dt.getTime())) return '';
+  return dt.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' });
+});
 
 const showSearchDropdown = computed(
   () => isSearchFocused.value && store.searchQuery.trim().length > 0
@@ -394,22 +412,99 @@ function formatShortDateTime(ev: CalendarEvent): string {
         </div>
       </div>
 
+      <!-- Offline / Online & Sync -->
       <button
+        v-if="store.isPublicShareMode"
         type="button"
         class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition flex items-center gap-1.5 text-xs"
-        :title="store.isOnline ? 'Online — Klik for at opdatere nu' : 'Offline — Ændringer gemmes i kø i IndexedDB'"
+        :title="store.isOnline ? 'Online — Klik for at opdatere nu' : 'Offline'"
         @click="store.syncWithServer(false)"
       >
         <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin text-blue-400': store.isSyncing }" />
         <Wifi v-if="store.isOnline" class="w-3.5 h-3.5 text-emerald-400" />
         <WifiOff v-else class="w-3.5 h-3.5 text-amber-400" />
-        <span
-          v-if="store.syncQueue.length > 0"
-          class="px-1.5 rounded-full bg-amber-500/30 text-amber-300 text-[10px]"
-        >
-          {{ store.syncQueue.length }}
-        </span>
       </button>
+
+      <div v-else class="relative">
+        <button
+          type="button"
+          class="px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition flex items-center gap-1.5 text-xs"
+          :title="store.isOnline ? 'Online — Klik for synkronisering og auto-opdatering' : 'Offline — Ændringer gemmes i kø i IndexedDB'"
+          @click="isSyncMenuOpen = !isSyncMenuOpen"
+        >
+          <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin text-blue-400': store.isSyncing }" />
+          <Wifi v-if="store.isOnline" class="w-3.5 h-3.5 text-emerald-400" />
+          <WifiOff v-else class="w-3.5 h-3.5 text-amber-400" />
+          <span
+            v-if="store.autoRefreshMinutes > 0"
+            class="px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-semibold"
+          >
+            {{ store.autoRefreshMinutes }}m
+          </span>
+          <span
+            v-else
+            class="px-1.5 py-0.2 rounded-full bg-slate-700 text-slate-400 text-[10px]"
+          >
+            Manuel
+          </span>
+          <span
+            v-if="store.syncQueue.length > 0"
+            class="px-1.5 rounded-full bg-amber-500/30 text-amber-300 text-[10px]"
+          >
+            {{ store.syncQueue.length }}
+          </span>
+        </button>
+
+        <div
+          v-if="isSyncMenuOpen"
+          class="fixed inset-0 z-40"
+          @click="isSyncMenuOpen = false"
+        ></div>
+
+        <div
+          v-if="isSyncMenuOpen"
+          class="absolute right-0 mt-2 w-64 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-3 z-50 text-xs space-y-2.5"
+        >
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+            <span class="flex items-center gap-1.5 font-bold text-slate-100">
+              <Clock class="w-3.5 h-3.5 text-blue-400" />
+              Synkronisering &amp; Interval
+            </span>
+            <span v-if="formattedLastSyncedAt" class="text-[10px] text-slate-400">
+              Sidst: {{ formattedLastSyncedAt }}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            :disabled="store.isSyncing"
+            class="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold flex items-center justify-center gap-1.5 shadow transition"
+            @click="store.syncWithServer(false); isSyncMenuOpen = false"
+          >
+            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': store.isSyncing }" />
+            <span>{{ store.isSyncing ? 'Synkroniserer...' : 'Synkronisér kalendere nu' }}</span>
+          </button>
+
+          <div class="pt-1 space-y-1">
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-1">
+              Automatisk opdatering
+            </div>
+            <button
+              v-for="opt in refreshOptions"
+              :key="opt.value"
+              type="button"
+              class="w-full px-2.5 py-1.5 rounded-lg flex items-center justify-between transition"
+              :class="store.autoRefreshMinutes === opt.value
+                ? 'bg-blue-600/20 text-blue-300 font-semibold border border-blue-500/40'
+                : 'hover:bg-slate-800 text-slate-300'"
+              @click="store.setAutoRefreshMinutes(opt.value); isSyncMenuOpen = false"
+            >
+              <span>{{ opt.label }}</span>
+              <Check v-if="store.autoRefreshMinutes === opt.value" class="w-3.5 h-3.5 text-blue-400" />
+            </button>
+          </div>
+        </div>
+      </div>
 
       <button
         v-if="!store.isPublicShareMode"
