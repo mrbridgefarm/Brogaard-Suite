@@ -85,7 +85,10 @@ watch(
     street.value = c.address?.street || '';
     postalCode.value = c.address?.postalCode || '';
     city.value = c.address?.city || '';
-    country.value = c.address?.country || '';
+    const hasCoreAddr = Boolean(
+      street.value.trim() || postalCode.value.trim() || city.value.trim()
+    );
+    country.value = hasCoreAddr ? c.address?.country || '' : '';
     categoriesText.value = (c.categories || []).join(', ');
     website.value = c.website || '';
     notes.value = c.notes || '';
@@ -186,7 +189,7 @@ async function handleSubmit() {
       ? anniversaryLabel.value.trim() || 'Bryllupsdag'
       : undefined,
     address:
-      street.value.trim() || city.value.trim() || postalCode.value.trim() || country.value.trim()
+      street.value.trim() || city.value.trim() || postalCode.value.trim()
         ? {
             street: street.value.trim(),
             city: city.value.trim(),
@@ -558,8 +561,8 @@ async function handleSubmit() {
           </div>
 
           <!-- Adresse -->
-          <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <div class="sm:col-span-2">
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+            <div class="sm:col-span-5">
               <label class="block text-slate-400 font-medium mb-1">Gade &amp; husnummer</label>
               <input
                 v-model="street"
@@ -568,7 +571,7 @@ async function handleSubmit() {
                 class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
               />
             </div>
-            <div>
+            <div class="sm:col-span-2">
               <label class="block text-slate-400 font-medium mb-1">Postnr.</label>
               <input
                 v-model="postalCode"
@@ -577,12 +580,21 @@ async function handleSubmit() {
                 class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
               />
             </div>
-            <div>
+            <div class="sm:col-span-3">
               <label class="block text-slate-400 font-medium mb-1">By</label>
               <input
                 v-model="city"
                 type="text"
                 placeholder="Aarhus C"
+                class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+              />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="block text-slate-400 font-medium mb-1">Land</label>
+              <input
+                v-model="country"
+                type="text"
+                placeholder="Danmark"
                 class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
               />
             </div>

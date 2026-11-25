@@ -615,7 +615,7 @@ export function parseVcardToContacts(
           const city = adrParts[3] || '';
           const postalCode = adrParts[5] || '';
           const country = adrParts[6] || '';
-          if (street || city || postalCode || country) {
+          if (street || city || postalCode) {
             address = { street, city, postalCode, country };
           }
           break;
@@ -799,7 +799,9 @@ export function buildVcardFromContact(contact: ContactDTO): string {
 
   if (
     contact.address &&
-    (contact.address.street || contact.address.city || contact.address.postalCode || contact.address.country)
+    (contact.address.street?.trim() ||
+      contact.address.city?.trim() ||
+      contact.address.postalCode?.trim())
   ) {
     lines.push(
       `ADR;TYPE=HOME:;;${escapeVcardText(contact.address.street || '')};${escapeVcardText(

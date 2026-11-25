@@ -156,6 +156,12 @@ function formatBirthdayLabel(bday: string): string {
 
 function formatAddressString(contact: Contact): string {
   if (!contact.address) return '';
+  const hasCoreAddress = Boolean(
+    contact.address.street?.trim() ||
+    contact.address.postalCode?.trim() ||
+    contact.address.city?.trim()
+  );
+  if (!hasCoreAddress) return '';
   return [
     contact.address.street,
     [contact.address.postalCode, contact.address.city].filter(Boolean).join(' '),
