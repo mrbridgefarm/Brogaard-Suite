@@ -72,7 +72,19 @@ import {
   removeDismissedSharedCalendarForEmails,
   clearDismissedSharedCalendars
 } from '../services/calendarPrefsStore.js';
-import { getAliasesForUser, findUsernamesOwningEmail } from '../services/aliasStore.js';
+import {
+  getAliasesForUser,
+  findUsernamesOwningEmail
+} from '../services/aliasStore.js';
+import {
+  getUserContactPrefs,
+  setUserBirthdayCalendarSync
+} from '../services/contactPrefsStore.js';
+import {
+  isBrogaardBirthdayCalendarUrl,
+  syncContactBirthdaysToCalDav,
+  disableContactBirthdaysCalDavSync
+} from '../services/birthdayCaldavSync.js';
 import {
   addUserSubscription,
   removeUserSubscription,
@@ -216,6 +228,14 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
         ) {
           void subscribeToSogoSharedCalendar(creds, c.url).catch(() => {});
         }
+      }
+    }
+
+    const contactPrefs = getUserContactPrefs(creds.username);
+    for (const c of visibleCaldavCalendars) {
+      if (!c.isShared && isBrogaardBirthdayCalendarUrl(c.url, contactPrefs.birthdayCalendarUrl)) {
+        c.isContactBirthdays = true;
+        c.readOnly = true;
       }
     }
 
@@ -391,6 +411,11 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
       events: [...mergedEvents, ...subData.events],
       nameOverrides: clientNameOverrides,
       dismissedSharedCount,
+      birthdayCalendarSync: {
+        enabled: Boolean(contactPrefs.birthdayCalendarSyncEnabled),
+        calendarUrl: contactPrefs.birthdayCalendarUrl || null,
+        lastSyncedAt: contactPrefs.birthdayCalendarLastSyncedAt || null
+      },
       syncedAt: new Date().toISOString()
     });
   } catch (err: any) {
@@ -558,10 +583,51 @@ caldavRouter.delete('/calendars', async (req: Request, res: Response) => {
       return;
     }
     await deleteCalDavCalendar(creds, calendarUrl);
+    const contactPrefs = getUserContactPrefs(creds.username);
+    if (isBrogaardBirthdayCalendarUrl(calendarUrl, contactPrefs.birthdayCalendarUrl)) {
+      setUserBirthdayCalendarSync(creds.username, { enabled: false, calendarUrl: null });
+    }
     res.json({ ok: true });
   } catch (err: any) {
     console.error('Fejl ved sletning af kalender:', err?.message || err);
     res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke slette kalenderen.' });
+  }
+});
+
+/**
+ * POST /api/caldav/birthdays-sync
+ * Opretter/opdaterer en rigtig CalDAV-kalender på Mailcow/SOGo med alle kontakters fødselsdage & mærkedage.
+ */
+caldavRouter.post('/birthdays-sync', async (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const result = await syncContactBirthdaysToCalDav(creds, { enable: true });
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    console.error('Fejl ved synkronisering af fødselsdagskalender til Mailcow:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke synkronisere fødselsdagskalenderen til Mailcow.'
+    });
+  }
+});
+
+/**
+ * DELETE /api/caldav/birthdays-sync
+ * Deaktiverer automatisk synk af fødselsdagskalenderen (og sletter evt. fjern-kalenderen på Mailcow).
+ */
+caldavRouter.delete('/birthdays-sync', async (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const deleteCalendar = Boolean(req.body?.deleteCalendar);
+    const result = await disableContactBirthdaysCalDavSync(creds, deleteCalendar);
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    console.error('Fejl ved afbrydelse af fødselsdagskalender-synk:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke stoppe synkroniseringen af fødselsdagskalenderen.'
+    });
   }
 });
 

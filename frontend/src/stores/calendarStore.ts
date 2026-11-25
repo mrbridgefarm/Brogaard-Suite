@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { db, purgeExpiredTrash } from '../db/database';
 import { useSuiteStore } from './suiteStore';
 import { useContactsStore } from './contactsStore';
@@ -28,6 +28,8 @@ import {
   apiExportIcs,
   apiSubscribeCalendar,
   apiUnsubscribeCalendar,
+  apiSyncBirthdaysToMailcow,
+  apiDisableBirthdaysSync,
   type LocalSubscriptionHint
 } from '../services/caldavApi';
 import { startReminderWatcher } from '../services/notifications';
@@ -119,6 +121,9 @@ export const useCalendarStore = defineStore('calendar', () => {
   const showContactBirthdays = ref<boolean>(
     localStorage.getItem(SHOW_BIRTHDAYS_KEY) !== 'false'
   );
+  const isSyncingBirthdaysToMailcow = ref<boolean>(false);
+  const birthdayCalendarSyncEnabled = ref<boolean>(false);
+  const birthdayCalendarUrl = ref<string | null>(null);
 
   const clipboard = ref<ClipboardState>({
     mode: null,
@@ -266,9 +271,13 @@ export const useCalendarStore = defineStore('calendar', () => {
     return pickDefaultTargetCalendar();
   });
 
-  // Virtuelle fødselsdage og mærkedage (f.eks. bryllupsdage) fra CardDAV Kontakter
+  const syncedBirthdayCalendar = computed<CalendarSource | undefined>(() =>
+    calendars.value.find((c) => c.isContactBirthdays)
+  );
+
+  // Virtuelle fødselsdage og mærkedage (bruges kun når kalenderen ikke allerede synkroniseres direkte fra Mailcow)
   const birthdayEvents = computed<CalendarEvent[]>(() => {
-    if (isPublicShareMode.value || !showContactBirthdays.value) return [];
+    if (isPublicShareMode.value || !showContactBirthdays.value || syncedBirthdayCalendar.value) return [];
     const currentYear = new Date().getFullYear();
     const selectedYear = Number(selectedDateStr.value?.slice(0, 4)) || currentYear;
     const yearsSet = new Set<number>();
@@ -502,6 +511,9 @@ export const useCalendarStore = defineStore('calendar', () => {
     userShares.value = [];
     syncQueue.value = [];
     dismissedSharedCount.value = 0;
+    birthdayCalendarSyncEnabled.value = false;
+    birthdayCalendarUrl.value = null;
+    isSyncingBirthdaysToMailcow.value = false;
     publicShareError.value = '';
     closeContextMenu();
   }
@@ -664,6 +676,14 @@ export const useCalendarStore = defineStore('calendar', () => {
       calendars.value = mergedCalendars;
       events.value = plainEvents;
       lastSyncedAt.value = res.syncedAt;
+      if (res.birthdayCalendarSync) {
+        birthdayCalendarSyncEnabled.value = Boolean(res.birthdayCalendarSync.enabled);
+        birthdayCalendarUrl.value = res.birthdayCalendarSync.calendarUrl || null;
+      } else {
+        const foundSyncedCal = mergedCalendars.find((c) => c.isContactBirthdays);
+        birthdayCalendarSyncEnabled.value = Boolean(foundSyncedCal);
+        birthdayCalendarUrl.value = foundSyncedCal?.url || null;
+      }
 
       if (!writableCalendars.value.some((c) => c.id === activeTargetCalendarId.value)) {
         const preferred = pickDefaultTargetCalendar();
@@ -1209,6 +1229,9 @@ export const useCalendarStore = defineStore('calendar', () => {
       cal.color = cal.serverColor;
     }
     saveColorOverrides(overrides);
+    if (cal.isContactBirthdays) {
+      await contactsStore.setContactCalendarColor(newColor);
+    }
     if (!isPublicShareMode.value) {
       await db.calendars.put(clonePlain(cal));
     }
@@ -2226,6 +2249,89 @@ export const useCalendarStore = defineStore('calendar', () => {
     notify('Kalender slettet', `"${cal.name}" og dens begivenheder er slettet.`, 'info');
   }
 
+  async function syncBirthdaysToMailcow(silent = false): Promise<boolean> {
+    if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return false;
+    if (!isOnline.value) {
+      if (!silent) {
+        notify('Offline', 'Du skal være online for at synkronisere til Mailcow.', 'warning');
+      }
+      return false;
+    }
+    isSyncingBirthdaysToMailcow.value = true;
+    try {
+      const res = await apiSyncBirthdaysToMailcow();
+      birthdayCalendarSyncEnabled.value = true;
+      birthdayCalendarUrl.value = res.calendarUrl;
+      await syncWithServer(true);
+      if (!silent) {
+        notify(
+          'Synkroniseret til Mailcow',
+          `${res.totalContactsEvents} fødselsdage/mærkedage ligger nu i en rigtig Mailcow-kalender (klar til telefon & Thunderbird).`,
+          'success',
+          6500
+        );
+      }
+      return true;
+    } catch (err: any) {
+      if (!silent) {
+        notify(
+          'Synkronisering fejlede',
+          err?.message || 'Kunne ikke oprette fødselsdagskalender på Mailcow.',
+          'error',
+          8000
+        );
+      }
+      return false;
+    } finally {
+      isSyncingBirthdaysToMailcow.value = false;
+    }
+  }
+
+  async function disableBirthdaysMailcowSync(deleteCalendar = false): Promise<void> {
+    if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return;
+    isSyncingBirthdaysToMailcow.value = true;
+    try {
+      const targetId = syncedBirthdayCalendar.value?.id;
+      await apiDisableBirthdaysSync(deleteCalendar);
+      birthdayCalendarSyncEnabled.value = false;
+      if (deleteCalendar) {
+        birthdayCalendarUrl.value = null;
+        if (targetId) {
+          await removeCalendarLocally(targetId);
+        }
+      }
+      notify(
+        deleteCalendar ? 'Kalender fjernet fra Mailcow' : 'Auto-synk stoppet',
+        deleteCalendar
+          ? 'Fødselsdage & Mærkedage vises nu igen kun lokalt fra dine kontakter.'
+          : 'Kontakter synkroniseres ikke længere automatisk til Mailcow-kalenderen.',
+        'info'
+      );
+    } catch (err: any) {
+      notify(
+        'Kunne ikke stoppe synk',
+        err?.message || 'Fejl ved fjernelse af fødselsdagskalender fra Mailcow.',
+        'error'
+      );
+    } finally {
+      isSyncingBirthdaysToMailcow.value = false;
+    }
+  }
+
+  watch(
+    () => contactsStore.contactsMutationCounter,
+    () => {
+      if (
+        (birthdayCalendarSyncEnabled.value || Boolean(syncedBirthdayCalendar.value)) &&
+        isOnline.value &&
+        !isPublicShareMode.value &&
+        session.value?.mode === 'CALDAV'
+      ) {
+        void syncWithServer(true);
+      }
+    }
+  );
+
   async function leaveSharedCalendar(calId: string): Promise<boolean> {
     if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return false;
     const cal = getCalendarById(calId);
@@ -2477,6 +2583,10 @@ export const useCalendarStore = defineStore('calendar', () => {
     events,
     birthdayEvents,
     showContactBirthdays,
+    syncedBirthdayCalendar,
+    isSyncingBirthdaysToMailcow,
+    birthdayCalendarSyncEnabled,
+    birthdayCalendarUrl,
     trashItems,
     syncQueue,
     shares,
@@ -2564,6 +2674,8 @@ export const useCalendarStore = defineStore('calendar', () => {
     createCalendar,
     subscribeToCalendar,
     deleteCalendar,
+    syncBirthdaysToMailcow,
+    disableBirthdaysMailcowSync,
     leaveSharedCalendar,
     hideCalendar,
     restoreHiddenCalendars,

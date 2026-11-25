@@ -12,6 +12,8 @@ import {
   fetchExternalContactPhotoAsDataUrl
 } from '../services/carddavClient.js';
 import { normalizeDanishText } from '../services/icalMapper.js';
+import { updateCalDavCalendarColor } from '../services/davClient.js';
+import { syncContactBirthdaysToCalDav } from '../services/birthdayCaldavSync.js';
 import { requireDavCredentials } from '../services/sessionAuth.js';
 import {
   canonicalContactPrefKey,
@@ -115,6 +117,11 @@ carddavRouter.post('/contacts', async (req: Request, res: Response) => {
       }
       saved.starred = contact.starred;
     }
+    if (getUserContactPrefs(creds.username).birthdayCalendarSyncEnabled) {
+      await syncContactBirthdaysToCalDav(creds).catch((e) =>
+        console.warn('Kunne ikke auto-synke fødselsdagskalender:', e)
+      );
+    }
     res.json({ ok: true, contact: saved });
   } catch (err: any) {
     console.error('Fejl ved gem af CardDAV kontakt:', err?.message || err);
@@ -178,7 +185,7 @@ carddavRouter.post('/favorite', async (req: Request, res: Response) => {
  * PUT /api/carddav/prefs
  * Gemmer brugerens valgte kalenderfarve til kontakt-fødselsdage/mærkedage på tværs af enheder.
  */
-carddavRouter.put('/prefs', (req: Request, res: Response) => {
+carddavRouter.put('/prefs', async (req: Request, res: Response) => {
   try {
     const creds = requireDavCredentials(req);
     const rawColor = req.body?.calendarColor;
@@ -186,6 +193,14 @@ carddavRouter.put('/prefs', (req: Request, res: Response) => {
       creds.username,
       typeof rawColor === 'string' ? rawColor : null
     );
+    const prefs = getUserContactPrefs(creds.username);
+    if (prefs.birthdayCalendarSyncEnabled && prefs.birthdayCalendarUrl) {
+      await updateCalDavCalendarColor(
+        creds,
+        prefs.birthdayCalendarUrl,
+        savedColor || '#ec4899'
+      ).catch(() => {});
+    }
     res.json({
       ok: true,
       calendarColor: savedColor
@@ -213,6 +228,11 @@ carddavRouter.delete('/contacts', async (req: Request, res: Response) => {
     }
 
     await deleteCardDavContact(creds, vcardUrl, etag);
+    if (getUserContactPrefs(creds.username).birthdayCalendarSyncEnabled) {
+      await syncContactBirthdaysToCalDav(creds).catch((e) =>
+        console.warn('Kunne ikke auto-synke fødselsdagskalender:', e)
+      );
+    }
     res.json({ ok: true });
   } catch (err: any) {
     console.error('Fejl ved sletning af CardDAV kontakt:', err?.message || err);
@@ -284,6 +304,12 @@ carddavRouter.post('/import', async (req: Request, res: Response) => {
         saved.starred = true;
       }
       savedContacts.push(saved);
+    }
+
+    if (getUserContactPrefs(creds.username).birthdayCalendarSyncEnabled) {
+      await syncContactBirthdaysToCalDav(creds).catch((e) =>
+        console.warn('Kunne ikke auto-synke fødselsdagskalender:', e)
+      );
     }
 
     res.json({

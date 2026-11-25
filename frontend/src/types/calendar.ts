@@ -31,6 +31,7 @@ export interface CalendarSource {
   sharePermission?: CalendarSharePermission;
   userShareId?: string;
   isSubscribed?: boolean; // Eksternt kalender-abonnement (.ics / webcal / Danske Helligdage)
+  isContactBirthdays?: boolean; // Synkroniseret fødselsdags-/mærkedagskalender fra Kontakter
   subscriptionUrl?: string;
   owner?: string;
   visible: boolean;

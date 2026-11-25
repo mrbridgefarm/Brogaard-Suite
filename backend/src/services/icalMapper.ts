@@ -198,23 +198,58 @@ export function parseIcsToEvents(
 
       if (expandRecurrences && event.isRecurring()) {
         try {
+          const isBrogaardManaged =
+            String(veventComp.getFirstPropertyValue('x-brogaard-managed') || '').toUpperCase() ===
+            'TRUE';
+          const originYearRaw = Number(veventComp.getFirstPropertyValue('x-brogaard-origin-year') || 0);
+          const managedKind = String(veventComp.getFirstPropertyValue('x-brogaard-kind') || '');
+          const managedName = normalizeDanishText(
+            String(veventComp.getFirstPropertyValue('x-brogaard-name') || '')
+          );
+          const managedLabel = normalizeDanishText(
+            String(veventComp.getFirstPropertyValue('x-brogaard-label') || '')
+          );
+
+          const windowMinMs = isBrogaardManaged
+            ? new Date(nowYear - 2, 0, 1).getTime()
+            : minExpandMs;
+          const windowMaxMs = isBrogaardManaged
+            ? new Date(nowYear + 4, 11, 31, 23, 59, 59).getTime()
+            : maxExpandMs;
+
           const iter = event.iterator();
           let nextDt: ICAL.Time | null = iter.next();
           let count = 0;
-          while (nextDt && count < 200) {
+          const maxIterations = isBrogaardManaged ? 300 : 200;
+          while (nextDt && count < maxIterations) {
             const occMs = nextDt.toJSDate().getTime();
-            if (occMs > maxExpandMs) break;
-            if (occMs >= minExpandMs) {
+            if (occMs > windowMaxMs) break;
+            if (occMs >= windowMinMs) {
               const details = event.getOccurrenceDetails(nextDt);
               const occAllDay = Boolean(details.startDate?.isDate);
               const occStart = formatIcalDate(details.startDate, occAllDay);
               const occEnd = formatIcalDate(details.endDate || details.startDate, occAllDay);
               const occUid = `${uid}_${occStart.slice(0, 10)}`;
+
+              let occTitle = normalizeDanishText(details.item.summary) || baseTitle;
+              if (isBrogaardManaged && managedName) {
+                const occYear = details.startDate?.year || Number(occStart.slice(0, 4));
+                const diffYears =
+                  originYearRaw >= 1900 && occYear ? occYear - originYearRaw : -1;
+                const yearsSuffix =
+                  diffYears >= 0 && diffYears <= 130 ? ` (${diffYears} år)` : '';
+                if (managedKind === 'birthday') {
+                  occTitle = `🎂 ${managedName}${yearsSuffix}`;
+                } else if (managedKind === 'anniversary') {
+                  occTitle = `💍 ${managedName} – ${managedLabel || 'Bryllupsdag'}${yearsSuffix}`;
+                }
+              }
+
               results.push({
                 id: `${calendarId}::${occUid}`,
                 uid: occUid,
                 calendarId,
-                title: normalizeDanishText(details.item.summary) || baseTitle,
+                title: occTitle,
                 start: occStart,
                 end: occEnd,
                 allDay: occAllDay,

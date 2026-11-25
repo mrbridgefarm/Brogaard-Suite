@@ -14,6 +14,11 @@ export interface SyncResponse {
   events: CalendarEvent[];
   nameOverrides?: Record<string, string>;
   dismissedSharedCount?: number;
+  birthdayCalendarSync?: {
+    enabled: boolean;
+    calendarUrl: string | null;
+    lastSyncedAt: string | null;
+  };
   syncedAt: string;
   error?: string;
 }
@@ -443,4 +448,47 @@ export async function apiUnsubscribeCalendar(
   if (!res.ok || !data.ok) {
     throw new Error(data.error || 'Kunne ikke afmelde kalender-abonnementet.');
   }
+}
+
+export interface BirthdaySyncResponse {
+  synced: boolean;
+  skipped?: boolean;
+  calendarUrl: string | null;
+  totalContactsEvents: number;
+  createdOrUpdated: number;
+  deleted: number;
+  unchanged: number;
+  lastSyncedAt: string | null;
+}
+
+export async function apiSyncBirthdaysToMailcow(): Promise<BirthdaySyncResponse> {
+  const res = await fetch('/api/caldav/birthdays-sync', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' }
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke synkronisere fødselsdagskalenderen til Mailcow.');
+  }
+  return data as BirthdaySyncResponse;
+}
+
+export async function apiDisableBirthdaysSync(
+  deleteCalendar = false
+): Promise<{ disabled: boolean; deletedCalendar: boolean }> {
+  const res = await fetch('/api/caldav/birthdays-sync', {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ deleteCalendar })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke stoppe fødselsdagssynkronisering.');
+  }
+  return {
+    disabled: Boolean(data.disabled),
+    deletedCalendar: Boolean(data.deletedCalendar)
+  };
 }

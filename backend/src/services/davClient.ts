@@ -28,6 +28,7 @@ export interface CalendarInfoDTO {
   sharePermission?: 'read' | 'write';
   userShareId?: string;
   isSubscribed?: boolean;
+  isContactBirthdays?: boolean;
   subscriptionUrl?: string;
   owner?: string;
   ctag?: string;
@@ -53,7 +54,7 @@ export function ensureTrailingSlash(url: string): string {
  * .../mail%40domæne.dk/Calendar/personal/ og .../mail@domæne.dk/Calendar/personal/
  * altid behandles som den nøjagtigt samme kalender.
  */
-function canonicalCalendarKey(rawUrl: string): string {
+export function canonicalCalendarKey(rawUrl: string): string {
   try {
     const u = new URL(ensureTrailingSlash(rawUrl.trim()));
     const decodedPath = u.pathname
@@ -1593,7 +1594,7 @@ async function fetchEventsFromCalendarDirectReport(
     const etagMatch = block.match(/<(?:[a-zA-Z0-9]+:)?getetag[^>]*>([^<]+)<\/(?:[a-zA-Z0-9]+:)?getetag>/i);
     const etag = etagMatch ? etagMatch[1].trim().replace(/^["']|["']$/g, '') : undefined;
 
-    const parsed = parseIcsToEvents(rawIcs, cal.id, objectUrl, etag, false, false);
+    const parsed = parseIcsToEvents(rawIcs, cal.id, objectUrl, etag, false, Boolean(cal.isContactBirthdays));
     events.push(...parsed);
   }
 
@@ -1610,7 +1611,7 @@ function getEventCacheKey(creds: CalDavCredentials, calUrl: string): string {
   return `${creds.serverUrl.trim().toLowerCase()}::${creds.username.trim().toLowerCase()}::${canonicalCalendarKey(calUrl)}`;
 }
 
-function invalidateUserEventCache(creds: CalDavCredentials) {
+export function invalidateUserEventCache(creds: CalDavCredentials) {
   const prefix = `${creds.serverUrl.trim().toLowerCase()}::${creds.username.trim().toLowerCase()}::`;
   for (const key of calendarEventsCache.keys()) {
     if (key.startsWith(prefix)) {
@@ -1831,6 +1832,47 @@ export async function renameCalDavCalendar(
       throw new Error('CalDAV-serveren afviste omdøbning af kalenderen.');
     }
   }
+}
+
+/**
+ * Opdaterer kalenderfarven (calendar-color) på brugerens egen kalender via CalDAV PROPPATCH.
+ */
+export async function updateCalDavCalendarColor(
+  creds: CalDavCredentials,
+  calendarUrl: string,
+  color: string
+): Promise<void> {
+  const safeColor = /^#[0-9a-fA-F]{6}$/.test(color.trim()) ? color.trim().toLowerCase() : FALLBACK_COLORS[0];
+  const targetUrl = ensureTrailingSlash(calendarUrl.trim());
+  assertSameServerOrigin(targetUrl, creds);
+
+  let decoded = targetUrl;
+  try {
+    decoded = decodeURIComponent(targetUrl);
+  } catch {
+    decoded = targetUrl;
+  }
+  const sogoOwnerMatch = decoded.match(/\/SOGo\/dav\/([^/]+)\//i);
+  if (sogoOwnerMatch && sogoOwnerMatch[1]) {
+    const urlOwner = sogoOwnerMatch[1].toLowerCase().trim();
+    const userLower = creds.username.toLowerCase().trim();
+    if (urlOwner !== userLower && urlOwner !== userLower.split('@')[0]) {
+      throw new Error('Du kan kun ændre farve på dine egne kalendere på serveren.');
+    }
+  }
+
+  const body = `<?xml version="1.0" encoding="utf-8"?>
+<D:propertyupdate xmlns:D="DAV:" xmlns:A="http://apple.com/ns/ical/">
+  <D:set>
+    <D:prop>
+      <A:calendar-color>${safeColor}FF</A:calendar-color>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>`;
+
+  await davRequest(creds, 'PROPPATCH', targetUrl, body, {
+    'Content-Type': 'application/xml; charset=utf-8'
+  });
 }
 
 /**

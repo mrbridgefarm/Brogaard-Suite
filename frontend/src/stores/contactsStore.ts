@@ -29,6 +29,7 @@ export const useContactsStore = defineStore('contacts', () => {
   const isSyncing = ref(false);
   const isSaving = ref(false);
   const lastSyncedAt = ref<string | null>(null);
+  const contactsMutationCounter = ref(0);
 
   const selectedAddressBookId = ref<string>('ALL');
   const selectedCategory = ref<string>('ALL');
@@ -293,6 +294,7 @@ export const useContactsStore = defineStore('contacts', () => {
       await db.contacts.put(saved).catch(() => {});
       selectedContactId.value = saved.id;
       isContactModalOpen.value = false;
+      contactsMutationCounter.value += 1;
 
       suiteStore.notify('Kontakt gemt', `"${saved.fullName}" er synkroniseret til Mailcow.`, 'success');
       return saved;
@@ -400,6 +402,7 @@ export const useContactsStore = defineStore('contacts', () => {
       if (selectedContactId.value === contact.id) {
         selectedContactId.value = filteredContacts.value[0]?.id || null;
       }
+      contactsMutationCounter.value += 1;
       suiteStore.notify('Kontakt slettet', `"${contact.fullName}" blev slettet fra adressebogen.`, 'info');
       return true;
     } catch (err: any) {
@@ -425,6 +428,9 @@ export const useContactsStore = defineStore('contacts', () => {
       }
     }
     await db.contacts.bulkPut(plain).catch(() => {});
+    if (res.importedCount > 0) {
+      contactsMutationCounter.value += 1;
+    }
     suiteStore.notify(
       'Kontakter importeret (.vcf)',
       `Importerede ${res.importedCount} kontakt(er) til Mailcow.`,
@@ -537,6 +543,7 @@ export const useContactsStore = defineStore('contacts', () => {
     isSyncing,
     isSaving,
     lastSyncedAt,
+    contactsMutationCounter,
     selectedAddressBookId,
     selectedCategory,
     searchQuery,

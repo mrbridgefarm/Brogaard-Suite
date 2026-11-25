@@ -21,7 +21,8 @@ import {
   UserMinus,
   Search,
   UserPlus,
-  Loader2
+  Loader2,
+  RefreshCw
 } from 'lucide-vue-next';
 import {
   useCalendarStore,
@@ -265,6 +266,15 @@ async function confirmDeleteCalendar(calId: string, name: string, isSubscribed =
   const ok = window.confirm(promptText);
   if (ok) {
     await store.deleteCalendar(calId);
+  }
+}
+
+async function confirmDisableBirthdaySync(cal: CalendarSource) {
+  const ok = window.confirm(
+    `Fjern "${cal.name}" fra Mailcow?\n\nKalenderen fjernes fra Mailcow (og dermed fra telefon/Thunderbird), og vises i stedet kun lokalt i Brogaard Suite.`
+  );
+  if (ok) {
+    await store.disableBirthdaysMailcowSync(true);
   }
 }
 
@@ -654,6 +664,11 @@ function removeSingleClipboardEvent(evId: string) {
                 />
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-1">
+                    <Cake
+                      v-if="cal.isContactBirthdays"
+                      class="w-3 h-3 shrink-0"
+                      :style="{ color: cal.color }"
+                    />
                     <span
                       class="text-xs font-medium text-slate-100 truncate"
                       :title="
@@ -665,7 +680,14 @@ function removeSingleClipboardEvent(evId: string) {
                       {{ cal.name }}
                     </span>
                     <span
-                      v-if="cal.isSubscribed || cal.id.startsWith('sub::')"
+                      v-if="cal.isContactBirthdays"
+                      class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[9px] font-semibold shrink-0"
+                      title="Synkroniseres til Mailcow CalDAV (telefon &amp; Thunderbird)"
+                    >
+                      Mailcow-synk
+                    </span>
+                    <span
+                      v-else-if="cal.isSubscribed || cal.id.startsWith('sub::')"
                       class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[9px] font-semibold shrink-0"
                       title="Abonneret kalender (opdateres automatisk, skrivebeskyttet)"
                     >
@@ -686,7 +708,10 @@ function removeSingleClipboardEvent(evId: string) {
                       <Users class="w-2.5 h-2.5" />
                     </span>
                   </div>
-                  <div v-if="cal.isSubscribed || cal.id.startsWith('sub::')" class="text-[10px] text-slate-400 truncate">
+                  <div v-if="cal.isContactBirthdays" class="text-[10px] text-emerald-300/80 truncate">
+                    Fra Kontakter • Synkes til telefon &amp; PC
+                  </div>
+                  <div v-else-if="cal.isSubscribed || cal.id.startsWith('sub::')" class="text-[10px] text-slate-400 truncate">
                     {{ cal.owner || 'Kalender-abonnement' }}
                   </div>
                   <div v-else-if="cal.isShared || cal.owner" class="text-[10px] text-slate-400 truncate">
@@ -715,6 +740,16 @@ function removeSingleClipboardEvent(evId: string) {
               <div class="flex items-center gap-0.5 shrink-0">
                 <template v-if="!store.isPublicShareMode">
                   <button
+                    v-if="cal.isContactBirthdays"
+                    type="button"
+                    :disabled="store.isSyncingBirthdaysToMailcow"
+                    class="p-1 rounded hover:bg-emerald-500/20 text-emerald-300 hover:text-emerald-200 transition disabled:opacity-50"
+                    title="Synk fødselsdage og mærkedage fra Kontakter nu"
+                    @click="store.syncBirthdaysToMailcow()"
+                  >
+                    <RefreshCw class="w-3 h-3" :class="store.isSyncingBirthdaysToMailcow ? 'animate-spin' : ''" />
+                  </button>
+                  <button
                     type="button"
                     class="p-1 rounded hover:bg-slate-700 transition"
                     :class="editingCalId === cal.id ? 'bg-slate-700 text-blue-300' : 'text-slate-400 hover:text-slate-100'"
@@ -742,11 +777,21 @@ function removeSingleClipboardEvent(evId: string) {
                     <UserMinus class="w-3 h-3" />
                   </button>
                   <button
-                    v-if="(!cal.readOnly && !cal.isShared) || cal.isSubscribed || cal.id.startsWith('sub::')"
+                    v-if="(!cal.readOnly && !cal.isShared) || cal.isSubscribed || cal.id.startsWith('sub::') || cal.isContactBirthdays"
                     type="button"
                     class="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
-                    :title="cal.isSubscribed || cal.id.startsWith('sub::') ? 'Afmeld kalender-abonnement' : 'Slet kalender (inkl. alle begivenheder)'"
-                    @click="confirmDeleteCalendar(cal.id, cal.name, Boolean(cal.isSubscribed || cal.id.startsWith('sub::')))"
+                    :title="
+                      cal.isContactBirthdays
+                        ? 'Fjern fødselsdagskalender fra Mailcow og stop synk'
+                        : cal.isSubscribed || cal.id.startsWith('sub::')
+                          ? 'Afmeld kalender-abonnement'
+                          : 'Slet kalender (inkl. alle begivenheder)'
+                    "
+                    @click="
+                      cal.isContactBirthdays
+                        ? confirmDisableBirthdaySync(cal)
+                        : confirmDeleteCalendar(cal.id, cal.name, Boolean(cal.isSubscribed || cal.id.startsWith('sub::')))
+                    "
                   >
                     <Trash2 class="w-3 h-3" />
                   </button>
@@ -850,62 +895,81 @@ function removeSingleClipboardEvent(evId: string) {
 
           <!-- Automatisk Fødselsdags- & Mærkedagskalender fra Brogaard Kontakter (CardDAV) -->
           <div
-            v-if="!store.isPublicShareMode && contactsStore.contactsWithSpecialDatesCount > 0"
-            class="p-2 rounded-xl border transition flex items-center justify-between gap-1.5"
+            v-if="!store.isPublicShareMode && contactsStore.contactsWithSpecialDatesCount > 0 && !store.syncedBirthdayCalendar"
+            class="p-2 rounded-xl border transition space-y-2"
             :class="store.showContactBirthdays
               ? 'bg-slate-800/60 border-slate-700/70'
               : 'bg-slate-900/40 border-slate-800/50 opacity-60'"
           >
-            <label class="flex items-center gap-2 min-w-0 cursor-pointer flex-1">
-              <input
-                type="checkbox"
-                :checked="store.showContactBirthdays"
-                class="rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-0 cursor-pointer shrink-0"
-                @change="store.toggleContactBirthdays()"
-              />
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-1">
-                  <Cake
-                    class="w-3 h-3 shrink-0"
-                    :style="{ color: contactsStore.contactCalendarColor }"
-                  />
-                  <span class="text-xs font-medium text-slate-100 truncate">
-                    {{
-                      contactsStore.contactsWithAnniversariesCount > 0
-                        ? 'Fødselsdage & Mærkedage'
-                        : 'Fødselsdage'
-                    }}
-                  </span>
-                </div>
-                <div class="text-[10px] text-slate-400 truncate">
-                  {{ contactsStore.contactsWithSpecialDatesCount }} kontakt(er) med datoer
-                </div>
-              </div>
-            </label>
-
-            <div class="flex items-center gap-0.5 shrink-0">
-              <button
-                v-if="contactsStore.contactCalendarColor.toLowerCase() !== DEFAULT_CONTACT_CALENDAR_COLOR"
-                type="button"
-                class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
-                title="Gendan standardfarve"
-                @click="store.setCalendarColorOverride(BIRTHDAY_CALENDAR_ID, null)"
-              >
-                <RotateCcw class="w-3 h-3" />
-              </button>
-              <label
-                class="w-4 h-4 rounded-full border border-white/20 cursor-pointer flex items-center justify-center overflow-hidden shadow-inner ml-0.5"
-                :style="{ backgroundColor: contactsStore.contactCalendarColor }"
-                title="Klik for at skifte kalenderfarve på fødselsdage og mærkedage"
-              >
+            <div class="flex items-center justify-between gap-1.5">
+              <label class="flex items-center gap-2 min-w-0 cursor-pointer flex-1">
                 <input
-                  type="color"
-                  :value="contactsStore.contactCalendarColor"
-                  class="opacity-0 w-0 h-0"
-                  @input="handleColorChange(BIRTHDAY_CALENDAR_ID, $event)"
+                  type="checkbox"
+                  :checked="store.showContactBirthdays"
+                  class="rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-0 cursor-pointer shrink-0"
+                  @change="store.toggleContactBirthdays()"
                 />
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-1">
+                    <Cake
+                      class="w-3 h-3 shrink-0"
+                      :style="{ color: contactsStore.contactCalendarColor }"
+                    />
+                    <span class="text-xs font-medium text-slate-100 truncate">
+                      {{
+                        contactsStore.contactsWithAnniversariesCount > 0
+                          ? 'Fødselsdage & Mærkedage'
+                          : 'Fødselsdage'
+                      }}
+                    </span>
+                  </div>
+                  <div class="text-[10px] text-slate-400 truncate">
+                    {{ contactsStore.contactsWithSpecialDatesCount }} kontakt(er) med datoer
+                  </div>
+                </div>
               </label>
+
+              <div class="flex items-center gap-0.5 shrink-0">
+                <button
+                  v-if="contactsStore.contactCalendarColor.toLowerCase() !== DEFAULT_CONTACT_CALENDAR_COLOR"
+                  type="button"
+                  class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                  title="Gendan standardfarve"
+                  @click="store.setCalendarColorOverride(BIRTHDAY_CALENDAR_ID, null)"
+                >
+                  <RotateCcw class="w-3 h-3" />
+                </button>
+                <label
+                  class="w-4 h-4 rounded-full border border-white/20 cursor-pointer flex items-center justify-center overflow-hidden shadow-inner ml-0.5"
+                  :style="{ backgroundColor: contactsStore.contactCalendarColor }"
+                  title="Klik for at skifte kalenderfarve på fødselsdage og mærkedage"
+                >
+                  <input
+                    type="color"
+                    :value="contactsStore.contactCalendarColor"
+                    class="opacity-0 w-0 h-0"
+                    @input="handleColorChange(BIRTHDAY_CALENDAR_ID, $event)"
+                  />
+                </label>
+              </div>
             </div>
+
+            <button
+              type="button"
+              :disabled="store.isSyncingBirthdaysToMailcow || !store.isOnline"
+              class="w-full py-1.5 px-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-[10.5px] font-semibold text-emerald-200 flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+              title="Opretter kalenderen direkte på Mailcow/SOGo så telefon (iOS/Android) og Thunderbird får den med"
+              @click="store.syncBirthdaysToMailcow()"
+            >
+              <RefreshCw class="w-3 h-3 shrink-0" :class="store.isSyncingBirthdaysToMailcow ? 'animate-spin' : ''" />
+              <span class="truncate">
+                {{
+                  store.isSyncingBirthdaysToMailcow
+                    ? 'Synkroniserer til Mailcow...'
+                    : 'Synk til Mailcow (telefon / Thunderbird)'
+                }}
+              </span>
+            </button>
           </div>
         </div>
 

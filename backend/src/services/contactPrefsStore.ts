@@ -6,6 +6,9 @@ export interface UserContactPrefs {
   favoriteContacts: string[];
   unstarredOverrides: string[];
   calendarColor?: string;
+  birthdayCalendarSyncEnabled?: boolean;
+  birthdayCalendarUrl?: string;
+  birthdayCalendarLastSyncedAt?: string;
 }
 
 type AllContactPrefs = Record<string, UserContactPrefs>;
@@ -30,10 +33,25 @@ function normalizeList(raw: unknown): string[] {
 function normalizePrefsEntry(raw: any): UserContactPrefs {
   const rawColor = typeof raw?.calendarColor === 'string' ? raw.calendarColor.trim() : '';
   const calendarColor = /^#[0-9a-fA-F]{6}$/.test(rawColor) ? rawColor.toLowerCase() : undefined;
+  const birthdayCalendarSyncEnabled =
+    typeof raw?.birthdayCalendarSyncEnabled === 'boolean'
+      ? raw.birthdayCalendarSyncEnabled
+      : undefined;
+  const birthdayCalendarUrl =
+    typeof raw?.birthdayCalendarUrl === 'string' && raw.birthdayCalendarUrl.trim()
+      ? raw.birthdayCalendarUrl.trim()
+      : undefined;
+  const birthdayCalendarLastSyncedAt =
+    typeof raw?.birthdayCalendarLastSyncedAt === 'string' && raw.birthdayCalendarLastSyncedAt.trim()
+      ? raw.birthdayCalendarLastSyncedAt.trim()
+      : undefined;
   return {
     favoriteContacts: normalizeList(raw?.favoriteContacts),
     unstarredOverrides: normalizeList(raw?.unstarredOverrides),
-    ...(calendarColor ? { calendarColor } : {})
+    ...(calendarColor ? { calendarColor } : {}),
+    ...(birthdayCalendarSyncEnabled !== undefined ? { birthdayCalendarSyncEnabled } : {}),
+    ...(birthdayCalendarUrl ? { birthdayCalendarUrl } : {}),
+    ...(birthdayCalendarLastSyncedAt ? { birthdayCalendarLastSyncedAt } : {})
   };
 }
 
@@ -43,7 +61,14 @@ function cloneAllPrefs(data: AllContactPrefs): AllContactPrefs {
     copy[userKey] = {
       favoriteContacts: [...entry.favoriteContacts],
       unstarredOverrides: [...entry.unstarredOverrides],
-      ...(entry.calendarColor ? { calendarColor: entry.calendarColor } : {})
+      ...(entry.calendarColor ? { calendarColor: entry.calendarColor } : {}),
+      ...(entry.birthdayCalendarSyncEnabled !== undefined
+        ? { birthdayCalendarSyncEnabled: entry.birthdayCalendarSyncEnabled }
+        : {}),
+      ...(entry.birthdayCalendarUrl ? { birthdayCalendarUrl: entry.birthdayCalendarUrl } : {}),
+      ...(entry.birthdayCalendarLastSyncedAt
+        ? { birthdayCalendarLastSyncedAt: entry.birthdayCalendarLastSyncedAt }
+        : {})
     };
   }
   return copy;
@@ -117,9 +142,9 @@ export function setUserContactFavorite(
   }
 
   all[userKey] = {
+    ...current,
     favoriteContacts: Array.from(favSet),
-    unstarredOverrides: Array.from(unstarSet),
-    ...(current.calendarColor ? { calendarColor: current.calendarColor } : {})
+    unstarredOverrides: Array.from(unstarSet)
   };
   writeAllPrefs(all);
 }
@@ -131,13 +156,55 @@ export function setUserContactCalendarColor(username: string, color: string | nu
   const clean = typeof color === 'string' ? color.trim().toLowerCase() : '';
   const validColor = /^#[0-9a-f]{6}$/.test(clean) ? clean : undefined;
 
-  all[userKey] = {
+  const next: UserContactPrefs = {
+    ...current,
     favoriteContacts: current.favoriteContacts,
-    unstarredOverrides: current.unstarredOverrides,
-    ...(validColor ? { calendarColor: validColor } : {})
+    unstarredOverrides: current.unstarredOverrides
   };
+  if (validColor) {
+    next.calendarColor = validColor;
+  } else {
+    delete next.calendarColor;
+  }
+  all[userKey] = next;
   writeAllPrefs(all);
   return validColor || null;
+}
+
+export function setUserBirthdayCalendarSync(
+  username: string,
+  patch: {
+    enabled?: boolean;
+    calendarUrl?: string | null;
+    lastSyncedAt?: string | null;
+  }
+): UserContactPrefs {
+  const all = readAllPrefs();
+  const userKey = username.toLowerCase().trim();
+  const current = all[userKey] || { favoriteContacts: [], unstarredOverrides: [] };
+  const next: UserContactPrefs = { ...current };
+
+  if (patch.enabled !== undefined) {
+    next.birthdayCalendarSyncEnabled = Boolean(patch.enabled);
+  }
+  if (patch.calendarUrl !== undefined) {
+    if (patch.calendarUrl && patch.calendarUrl.trim()) {
+      next.birthdayCalendarUrl = patch.calendarUrl.trim();
+    } else {
+      delete next.birthdayCalendarUrl;
+    }
+  }
+  if (patch.lastSyncedAt !== undefined) {
+    if (patch.lastSyncedAt && patch.lastSyncedAt.trim()) {
+      next.birthdayCalendarLastSyncedAt = patch.lastSyncedAt.trim();
+    } else {
+      delete next.birthdayCalendarLastSyncedAt;
+    }
+  }
+
+  all[userKey] = next;
+  writeAllPrefs(all);
+  return next;
 }
 
 export function clearUserContactUnstarOverride(username: string, contactId: string): void {
@@ -150,9 +217,9 @@ export function clearUserContactUnstarOverride(username: string, contactId: stri
   const nextUnstar = current.unstarredOverrides.filter((k) => k !== key);
   if (nextUnstar.length !== current.unstarredOverrides.length) {
     all[userKey] = {
+      ...current,
       favoriteContacts: current.favoriteContacts,
-      unstarredOverrides: nextUnstar,
-      ...(current.calendarColor ? { calendarColor: current.calendarColor } : {})
+      unstarredOverrides: nextUnstar
     };
     writeAllPrefs(all);
   }
