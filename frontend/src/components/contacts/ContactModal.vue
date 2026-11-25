@@ -213,27 +213,48 @@ async function handleSubmit() {
       class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
       @click.self="store.isContactModalOpen = false"
     >
-      <div class="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        <!-- Header -->
-        <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-          <div class="flex items-center gap-2.5">
-            <div class="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
+      <form
+        class="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
+        @submit.prevent="handleSubmit"
+      >
+        <!-- Fast Header med Annullér & Gem -->
+        <div class="px-4 sm:px-5 py-3 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 bg-slate-900">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
               <Users class="w-4 h-4" />
             </div>
-            <h3 class="text-base font-bold text-slate-100">
+            <h3 class="text-sm sm:text-base font-bold text-slate-100 truncate">
               {{ isExisting ? 'Redigér kontakt' : 'Opret ny kontakt' }}
             </h3>
           </div>
-          <button
-            type="button"
-            class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-            @click="store.isContactModalOpen = false"
-          >
-            <X class="w-4 h-4" />
-          </button>
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+              @click="store.isContactModalOpen = false"
+            >
+              Annullér
+            </button>
+            <button
+              type="submit"
+              :disabled="store.isSaving"
+              class="px-3.5 py-1.5 rounded-xl dav-theme-btn text-xs font-semibold flex items-center gap-1.5 shadow transition disabled:opacity-50"
+            >
+              <Save class="w-3.5 h-3.5" />
+              <span>{{ store.isSaving ? 'Gemmer...' : 'Gem kontakt' }}</span>
+            </button>
+            <button
+              type="button"
+              class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
+              title="Luk"
+              @click="store.isContactModalOpen = false"
+            >
+              <X class="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        <form class="p-5 space-y-4 overflow-y-auto text-xs" @submit.prevent="handleSubmit">
+        <div class="p-4 space-y-3 overflow-y-auto text-xs flex-1 min-h-0">
           <!-- Kontaktbillede & Favorit -->
           <div
             class="p-3.5 rounded-2xl bg-slate-950/80 border transition flex flex-wrap items-center justify-between gap-4"
@@ -577,27 +598,8 @@ async function handleSubmit() {
               class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
             ></textarea>
           </div>
-
-          <!-- Footer -->
-          <div class="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
-            <button
-              type="button"
-              class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition"
-              @click="store.isContactModalOpen = false"
-            >
-              Annullér
-            </button>
-            <button
-              type="submit"
-              :disabled="store.isSaving"
-              class="px-4 py-2 rounded-xl dav-theme-btn font-semibold flex items-center gap-1.5 shadow transition disabled:opacity-50"
-            >
-              <Save class="w-3.5 h-3.5" />
-              <span>{{ store.isSaving ? 'Gemmer...' : 'Gem kontakt' }}</span>
-            </button>
-          </div>
-        </form>
-      </div>
+        </div>
+      </form>
     </div>
   </Teleport>
 </template>
