@@ -69,6 +69,15 @@ const sharedSearchError = ref('');
 const subscribingSharedUrl = ref<string | null>(null);
 const showSharedSuggestions = ref(false);
 
+const sortedCalendars = computed(() =>
+  [...store.calendars].sort((a, b) => {
+    const aIsBday = Boolean(a.isContactBirthdays);
+    const bIsBday = Boolean(b.isContactBirthdays);
+    if (aIsBday !== bIsBday) return aIsBday ? 1 : -1;
+    return a.name.localeCompare(b.name, 'da-DK');
+  })
+);
+
 const sharedContactSuggestions = computed(() => {
   if (!showSharedSuggestions.value) return [];
   const q = sharedSearchQuery.value.trim();
@@ -647,7 +656,7 @@ function removeSingleClipboardEvent(evId: string) {
 
         <div class="space-y-1.5">
           <div
-            v-for="cal in store.calendars"
+            v-for="cal in sortedCalendars"
             :key="cal.id"
             class="group p-2 rounded-xl border transition space-y-1.5"
             :class="cal.visible
