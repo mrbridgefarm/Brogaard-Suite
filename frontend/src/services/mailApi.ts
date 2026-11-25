@@ -56,6 +56,7 @@ export async function fetchFolderMessagesApi(params: {
   folder: string;
   limit?: number;
   page?: number;
+  offset?: number;
   searchQuery?: string;
   searchAllFolders?: boolean;
 }): Promise<{ messages: MailHeader[]; total: number; unread: number }> {
@@ -120,6 +121,13 @@ export async function markAllFolderMessagesAsReadApi(
   folder: string
 ): Promise<{ markedCount: number }> {
   return apiRequest('/folder-mark-all-read', {
+    method: 'POST',
+    body: JSON.stringify({ folder })
+  });
+}
+
+export async function emptyFolderApi(folder: string): Promise<{ deletedCount: number }> {
+  return apiRequest('/folder-empty', {
     method: 'POST',
     body: JSON.stringify({ folder })
   });

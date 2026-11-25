@@ -278,6 +278,22 @@ function handleCreateCalendarEvent() {
         </button>
 
         <button
+          v-if="
+            (store.contextMenu.targetFolder.specialUse === 'trash' ||
+              store.contextMenu.targetFolder.specialUse === 'junk') &&
+            store.contextMenu.targetFolder.totalMessages > 0
+          "
+          type="button"
+          class="w-full px-3 py-1.5 hover:bg-rose-500/20 text-rose-300 flex items-center justify-between"
+          @click="store.emptyFolder(store.contextMenu.targetFolder.path); store.closeContextMenu()"
+        >
+          <span class="flex items-center gap-2">
+            <Trash2 class="w-3.5 h-3.5 text-rose-400" />
+            {{ store.contextMenu.targetFolder.specialUse === 'trash' ? 'Tøm papirkurv' : 'Tøm spam' }}
+          </span>
+        </button>
+
+        <button
           type="button"
           :disabled="store.clipboard.messages.length === 0"
           class="w-full px-3 py-1.5 hover:bg-slate-800 disabled:opacity-40 flex items-center justify-between"

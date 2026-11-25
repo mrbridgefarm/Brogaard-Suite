@@ -25,6 +25,7 @@ import {
   fetchMessageDetailApi,
   updateFlagsApi,
   markAllFolderMessagesAsReadApi,
+  emptyFolderApi,
   transferMessagesApi,
   deleteMessagesApi,
   reportSpamStatusApi,
@@ -78,6 +79,8 @@ export const useMailStore = defineStore('mail', () => {
   const messages = ref<MailHeader[]>([]);
   const totalFolderMessages = ref(0);
   const isLoadingMore = ref(false);
+  const isLoadingAll = ref(false);
+  const isEmptyingFolder = ref(false);
   const selectedMessageIds = ref<string[]>([]);
   const selectionAnchorId = ref<string | null>(null);
   const selectionFocusId = ref<string | null>(null);
@@ -359,6 +362,8 @@ export const useMailStore = defineStore('mail', () => {
     messages.value = [];
     totalFolderMessages.value = 0;
     isLoadingMore.value = false;
+    isLoadingAll.value = false;
+    isEmptyingFolder.value = false;
     selectedMessageIds.value = [];
     selectionAnchorId.value = null;
     selectionFocusId.value = null;
@@ -490,20 +495,20 @@ export const useMailStore = defineStore('mail', () => {
     }
   }
 
-  async function loadMoreMessages() {
+  async function loadMoreMessages(batchSize = MAIL_PAGE_SIZE): Promise<boolean> {
     if (!isAuthenticated.value || !hasMoreMessages.value || isLoadingMore.value || isSyncing.value) {
-      return;
+      return false;
     }
     const targetFolder = activeFolderPath.value;
+    const safeBatch = Math.min(1000, Math.max(20, Number(batchSize || MAIL_PAGE_SIZE)));
     isLoadingMore.value = true;
     try {
-      const nextPage = Math.floor(messages.value.length / MAIL_PAGE_SIZE) + 1;
       const res = await fetchFolderMessagesApi({
         folder: targetFolder,
-        limit: MAIL_PAGE_SIZE,
-        page: nextPage
+        limit: safeBatch,
+        offset: messages.value.length
       });
-      if (activeFolderPath.value !== targetFolder) return;
+      if (activeFolderPath.value !== targetFolder) return false;
 
       const byId = new Map<string, MailHeader>();
       for (const m of messages.value) byId.set(m.id, m);
@@ -529,14 +534,92 @@ export const useMailStore = defineStore('mail', () => {
       } catch {
         // Ignorér
       }
+
+      return grew && res.messages.length > 0;
     } catch (err: any) {
       notify(
         'Kunne ikke indlæse flere',
         err?.message || 'Fejl ved hentning af ældre e-mails.',
         'error'
       );
+      return false;
     } finally {
       isLoadingMore.value = false;
+    }
+  }
+
+  async function loadAllMessages() {
+    if (
+      !isAuthenticated.value ||
+      !hasMoreMessages.value ||
+      isLoadingMore.value ||
+      isLoadingAll.value ||
+      isSyncing.value
+    ) {
+      return;
+    }
+    const targetFolder = activeFolderPath.value;
+    isLoadingAll.value = true;
+    try {
+      while (
+        hasMoreMessages.value &&
+        activeFolderPath.value === targetFolder &&
+        messages.value.length < 10000
+      ) {
+        const loaded = await loadMoreMessages(500);
+        if (!loaded) break;
+      }
+    } finally {
+      isLoadingAll.value = false;
+    }
+  }
+
+  async function emptyFolder(folderPath?: string) {
+    const targetPath = folderPath || activeFolderPath.value;
+    const folderObj = folders.value.find((f) => f.path === targetPath);
+    if (!folderObj || (folderObj.specialUse !== 'trash' && folderObj.specialUse !== 'junk')) {
+      notify('Ikke tilladt', 'Kun Papirkurv og Spam kan tømmes helt.', 'warning');
+      return;
+    }
+    const countLabel =
+      folderObj.totalMessages > 0 ? ` (${folderObj.totalMessages} e-mail(s))` : '';
+    const confirmed = window.confirm(
+      `Tøm "${folderObj.name}"${countLabel}?\n\nAlle e-mails i mappen slettes permanent og kan ikke fortrydes.`
+    );
+    if (!confirmed) return;
+
+    isEmptyingFolder.value = true;
+    try {
+      const res = await emptyFolderApi(targetPath);
+      try {
+        await db.mailHeaders.where('folder').equals(targetPath).delete();
+      } catch {
+        // Ignorér
+      }
+
+      folderObj.totalMessages = 0;
+      folderObj.unreadMessages = 0;
+
+      if (activeFolderPath.value === targetPath) {
+        messages.value = [];
+        totalFolderMessages.value = 0;
+        selectedMessageIds.value = [];
+        selectionAnchorId.value = null;
+        selectionFocusId.value = null;
+        activeMessageId.value = null;
+        activeMessageDetail.value = null;
+      }
+
+      notify(
+        folderObj.specialUse === 'trash' ? 'Papirkurv tømt' : 'Spam tømt',
+        `${res.deletedCount} e-mail(s) blev slettet permanent.`,
+        'success'
+      );
+      void fetchFoldersApi().then((f) => (folders.value = f));
+    } catch (err: any) {
+      notify('Kunne ikke tømme mappe', err?.message || 'Fejl ved tømning af mappe.', 'error');
+    } finally {
+      isEmptyingFolder.value = false;
     }
   }
 
@@ -1515,6 +1598,8 @@ export const useMailStore = defineStore('mail', () => {
     messages,
     totalFolderMessages,
     isLoadingMore,
+    isLoadingAll,
+    isEmptyingFolder,
     hasMoreMessages,
     selectedMessageIds,
     selectionAnchorId,
@@ -1554,6 +1639,8 @@ export const useMailStore = defineStore('mail', () => {
     selectFolder,
     loadFolderMessages,
     loadMoreMessages,
+    loadAllMessages,
+    emptyFolder,
     runServerSearch,
     openMessage,
     selectMessageRange,

@@ -10,6 +10,7 @@ import {
   markAllFolderMessagesAsSeen,
   transferMessages,
   deleteMessages,
+  emptyImapFolder,
   reportSpamStatus,
   createImapFolder,
   renameImapFolder,
@@ -123,6 +124,7 @@ mailRouter.post('/messages', async (req: Request, res: Response) => {
     const folder = String(req.body?.folder || 'INBOX').trim();
     const limit = Number(req.body?.limit || 100);
     const page = Number(req.body?.page || 1);
+    const offset = req.body?.offset !== undefined ? Number(req.body.offset) : undefined;
     const searchQuery = String(req.body?.searchQuery || '').trim();
     const searchAllFolders = req.body?.searchAllFolders !== false;
 
@@ -139,7 +141,7 @@ mailRouter.post('/messages', async (req: Request, res: Response) => {
       return;
     }
 
-    const data = await fetchFolderMessages(creds, folder, { limit, page, searchQuery });
+    const data = await fetchFolderMessages(creds, folder, { limit, page, offset, searchQuery });
     res.json({
       ok: true,
       folder,
@@ -232,6 +234,24 @@ mailRouter.post('/folder-mark-all-read', async (req: Request, res: Response) => 
     res.json({ ok: true, ...result });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke markere mappen som læst.' });
+  }
+});
+
+/**
+ * POST /api/mail/folder-empty
+ */
+mailRouter.post('/folder-empty', async (req: Request, res: Response) => {
+  try {
+    const creds = requireMailCredentials(req);
+    const folder = String(req.body?.folder || '').trim();
+    if (!folder) {
+      res.status(400).json({ ok: false, error: 'Mappesti mangler.' });
+      return;
+    }
+    const result = await emptyImapFolder(creds, folder);
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke tømme mappen.' });
   }
 });
 

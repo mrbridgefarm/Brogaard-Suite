@@ -27,6 +27,23 @@ const store = useMailStore();
 const { currentTheme } = useTheme();
 const listScrollRef = ref<HTMLElement | null>(null);
 
+function handleListScroll() {
+  const el = listScrollRef.value;
+  if (
+    !el ||
+    !store.hasMoreMessages ||
+    store.isLoadingMore ||
+    store.isLoadingAll ||
+    store.isSyncing
+  ) {
+    return;
+  }
+  const distanceToBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+  if (distanceToBottom <= 220) {
+    void store.loadMoreMessages();
+  }
+}
+
 watch(
   () => store.selectionFocusId || store.activeMessageId,
   async (focusId) => {
@@ -228,10 +245,43 @@ function formatSmartDate(iso: string): string {
           <Trash2 class="w-3.5 h-3.5" />
         </button>
       </div>
+
+      <!-- Hurtig Tøm papirkurv / Tøm spam knap -->
+      <div
+        v-else-if="
+          !store.searchQuery.trim() &&
+          (store.activeFolder?.specialUse === 'trash' || store.activeFolder?.specialUse === 'junk') &&
+          (store.totalFolderMessages > 0 || store.messages.length > 0)
+        "
+        class="flex items-center shrink-0"
+      >
+        <button
+          type="button"
+          :disabled="store.isEmptyingFolder || store.isSyncing"
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 border border-rose-400/35 text-rose-200 text-[11px] font-semibold disabled:opacity-50 transition whitespace-nowrap"
+          :title="store.activeFolder?.specialUse === 'trash' ? 'Slet alle e-mails i Papirkurv permanent' : 'Slet alle e-mails i Spam permanent'"
+          @click="store.emptyFolder(store.activeFolderPath)"
+        >
+          <Trash2 class="w-3 h-3 text-rose-400" />
+          <span>
+            {{
+              store.isEmptyingFolder
+                ? 'Tømmer...'
+                : store.activeFolder?.specialUse === 'trash'
+                  ? 'Tøm papirkurv'
+                  : 'Tøm spam'
+            }}
+          </span>
+        </button>
+      </div>
     </div>
 
     <!-- Beskedliste -->
-    <div ref="listScrollRef" class="flex-1 overflow-y-auto divide-y divide-slate-800/70">
+    <div
+      ref="listScrollRef"
+      class="flex-1 overflow-y-auto divide-y divide-slate-800/70"
+      @scroll.passive="handleListScroll"
+    >
       <div
         v-if="store.filteredMessages.length === 0"
         class="p-8 text-center text-xs text-slate-400 space-y-2"
@@ -355,17 +405,29 @@ function formatSmartDate(iso: string): string {
         </div>
       </div>
 
-      <div v-if="store.hasMoreMessages" class="p-3 flex justify-center">
+      <div v-if="store.hasMoreMessages" class="p-3 flex flex-wrap items-center justify-center gap-2">
         <button
           type="button"
-          :disabled="store.isLoadingMore || store.isSyncing"
-          class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-200 disabled:opacity-50 transition"
+          :disabled="store.isLoadingMore || store.isLoadingAll || store.isSyncing"
+          class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-200 disabled:opacity-50 transition"
           @click="store.loadMoreMessages()"
         >
           {{
             store.isLoadingMore
-              ? 'Indlæser flere e-mails...'
-              : `Indlæs flere (viser ${store.messages.length} af ${store.totalFolderMessages})`
+              ? 'Indlæser flere...'
+              : `Indlæs flere (${store.messages.length} af ${store.totalFolderMessages})`
+          }}
+        </button>
+        <button
+          type="button"
+          :disabled="store.isLoadingMore || store.isLoadingAll || store.isSyncing"
+          class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/35 border border-blue-400/35 text-blue-200 disabled:opacity-50 transition"
+          @click="store.loadAllMessages()"
+        >
+          {{
+            store.isLoadingAll
+              ? `Indlæser alle (${store.messages.length} af ${store.totalFolderMessages})...`
+              : `Indlæs alle (${store.totalFolderMessages})`
           }}
         </button>
       </div>

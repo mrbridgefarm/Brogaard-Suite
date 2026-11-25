@@ -373,12 +373,15 @@ function parseMessageDate(envDate: unknown, internalDate: unknown): Date {
 export async function fetchFolderMessages(
   creds: MailServerCredentials,
   folderPath: string,
-  options?: { limit?: number; page?: number; searchQuery?: string }
+  options?: { limit?: number; page?: number; offset?: number; searchQuery?: string }
 ): Promise<{ messages: MailHeaderDTO[]; total: number; unread: number }> {
   const limit = Math.min(1000, Math.max(20, Number(options?.limit || 100)));
   const page = Math.max(1, Number(options?.page || 1));
   const searchQuery = (options?.searchQuery || '').trim();
-  const startIdx = (page - 1) * limit;
+  const startIdx =
+    options?.offset !== undefined && !isNaN(Number(options.offset))
+      ? Math.max(0, Number(options.offset))
+      : (page - 1) * limit;
 
   return withImap(creds, async (client) => {
     const lock = await client.getMailboxLock(folderPath, { readOnly: true });
@@ -434,7 +437,7 @@ export async function fetchFolderMessages(
           const unread = Array.isArray(unseenUids) ? unseenUids.length : 0;
           return { messages: [], total, unread };
         }
-        if (total <= limit && page === 1) {
+        if (total <= limit && startIdx === 0) {
           rangeOrUids = '1:*';
           useUidFetch = false;
         } else if (total <= 10000) {
@@ -952,6 +955,38 @@ export async function deleteMessages(
         await client.messageDelete(uidRange, { uid: true });
         return { movedToTrash: false };
       }
+    } finally {
+      lock.release();
+    }
+  });
+}
+
+/**
+ * Tømmer hele Papirkurv eller Spam-mappen permanent.
+ */
+export async function emptyImapFolder(
+  creds: MailServerCredentials,
+  folderPath: string
+): Promise<{ deletedCount: number }> {
+  return withImap(creds, async (client) => {
+    const list = await client.list();
+    const box = list.find((b) => b.path === folderPath);
+    if (!box) {
+      throw new Error('Mappen blev ikke fundet på IMAP-serveren.');
+    }
+    const special = detectSpecialUse(box.path, box.name, box.specialUse);
+    if (special !== 'trash' && special !== 'junk') {
+      throw new Error('Kun Papirkurv og Spam kan tømmes helt.');
+    }
+
+    const lock = await client.getMailboxLock(folderPath);
+    try {
+      const total = client.mailbox ? Number(client.mailbox.exists || 0) : 0;
+      if (total === 0) {
+        return { deletedCount: 0 };
+      }
+      await client.messageDelete('1:*', { uid: false });
+      return { deletedCount: total };
     } finally {
       lock.release();
     }
