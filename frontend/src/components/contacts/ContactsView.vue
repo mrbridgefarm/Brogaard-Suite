@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
+import { computed, ref, watch, nextTick } from 'vue';
 import {
   Users,
   Star,
@@ -18,7 +18,12 @@ import {
   Lock,
   ExternalLink,
   BookUser,
-  Plus
+  Plus,
+  CheckSquare,
+  Square,
+  X,
+  Download,
+  RefreshCw
 } from 'lucide-vue-next';
 import ContactsTopBar from './ContactsTopBar.vue';
 import { useContactsStore } from '../../stores/contactsStore';
@@ -46,8 +51,66 @@ const listWidth = ref<number>(
 const isResizing = ref(false);
 const listScrollRef = ref<HTMLElement | null>(null);
 
+const bulkTagInput = ref('');
+const stagedTagsToAdd = ref<string[]>([]);
+const bulkOrgInput = ref('');
+
+const allVisibleSelected = computed<boolean>(
+  () =>
+    store.filteredContacts.length > 0 &&
+    store.filteredContacts.every((c) => store.isContactSelected(c.id))
+);
+
+const selectedEmailRecipients = computed<Array<{ email: string; name?: string }>>(() => {
+  const list: Array<{ email: string; name?: string }> = [];
+  for (const c of store.selectedContacts) {
+    const primary = (c.emails || []).find((e) => e.value?.trim());
+    if (primary) {
+      list.push({ email: primary.value.trim(), name: c.fullName });
+    }
+  }
+  return list;
+});
+
+const selectedContactsTagSummary = computed<Array<{ name: string; count: number }>>(() => {
+  const counts = new Map<string, { name: string; count: number }>();
+  for (const c of store.writableSelectedContacts) {
+    const seenInContact = new Set<string>();
+    for (const rawCat of c.categories || []) {
+      const clean = rawCat.trim();
+      const lower = clean.toLowerCase();
+      if (!clean || seenInContact.has(lower)) continue;
+      seenInContact.add(lower);
+      const existing = counts.get(lower);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        counts.set(lower, { name: clean, count: 1 });
+      }
+    }
+  }
+  return Array.from(counts.values()).sort(
+    (a, b) => b.count - a.count || a.name.localeCompare(b.name, 'da-DK')
+  );
+});
+
+const parsedTagsToAdd = computed<string[]>(() => {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  const pushTag = (raw: string) => {
+    const clean = raw.trim();
+    const lower = clean.toLowerCase();
+    if (!clean || seen.has(lower)) return;
+    seen.add(lower);
+    result.push(clean);
+  };
+  for (const tag of stagedTagsToAdd.value) pushTag(tag);
+  for (const part of bulkTagInput.value.split(',')) pushTag(part);
+  return result;
+});
+
 watch(
-  () => store.selectedContactId,
+  () => store.selectionFocusId || store.selectedContactId,
   async (contactId) => {
     if (!contactId || !listScrollRef.value) return;
     await nextTick();
@@ -57,6 +120,17 @@ watch(
         row.scrollIntoView({ block: 'nearest' });
         break;
       }
+    }
+  }
+);
+
+watch(
+  () => store.selectedContactIds.length,
+  (len) => {
+    if (len === 0) {
+      bulkTagInput.value = '';
+      stagedTagsToAdd.value = [];
+      bulkOrgInput.value = '';
     }
   }
 );
@@ -216,6 +290,82 @@ function confirmDelete(contact: Contact) {
   );
   if (ok) {
     void store.deleteContact(contact);
+  }
+}
+
+function handleContactRowClick(contact: Contact, e: MouseEvent) {
+  if (e.shiftKey) {
+    store.selectContact(contact, { range: true });
+    return;
+  }
+  if (e.ctrlKey || e.metaKey) {
+    store.selectContact(contact, { toggle: true });
+    return;
+  }
+  store.selectContact(contact);
+}
+
+function isStagedTag(tagName: string): boolean {
+  const lower = tagName.trim().toLowerCase();
+  return stagedTagsToAdd.value.some((t) => t.trim().toLowerCase() === lower);
+}
+
+function toggleStagedTag(tagName: string) {
+  const clean = tagName.trim();
+  const lower = clean.toLowerCase();
+  if (!clean) return;
+  if (isStagedTag(clean)) {
+    stagedTagsToAdd.value = stagedTagsToAdd.value.filter(
+      (t) => t.trim().toLowerCase() !== lower
+    );
+  } else {
+    stagedTagsToAdd.value = [...stagedTagsToAdd.value, clean];
+  }
+}
+
+async function handleBulkAddTags() {
+  if (store.isBulkUpdating || parsedTagsToAdd.value.length === 0) return;
+  await store.bulkModifyTags(parsedTagsToAdd.value, []);
+  bulkTagInput.value = '';
+  stagedTagsToAdd.value = [];
+}
+
+async function handleBulkRemoveTag(tagName: string) {
+  if (store.isBulkUpdating) return;
+  await store.bulkModifyTags([], [tagName]);
+}
+
+async function handleBulkSetOrganization(clear = false) {
+  if (store.isBulkUpdating) return;
+  if (clear) {
+    await store.bulkUpdateFields({ clearOrganization: true });
+    bulkOrgInput.value = '';
+    return;
+  }
+  const cleanOrg = bulkOrgInput.value.trim();
+  if (!cleanOrg) return;
+  const updated = await store.bulkUpdateFields({ organization: cleanOrg });
+  if (updated > 0) {
+    bulkOrgInput.value = '';
+  }
+}
+
+function handleBulkSendEmail(field: 'bcc' | 'to' = 'bcc') {
+  suiteStore.composeMailToMany(selectedEmailRecipients.value, field);
+}
+
+function confirmBulkDelete() {
+  const writableCount = store.writableSelectedContacts.length;
+  if (writableCount === 0) return;
+  const readOnlyNote =
+    store.readOnlySelectedCount > 0
+      ? `\n\n(${store.readOnlySelectedCount} skrivebeskyttet(e) kontakt(er) springes over.)`
+      : '';
+  const ok = window.confirm(
+    `Er du sikker på, at du vil slette ${writableCount} valgt(e) kontakt(er) fra Mailcow?${readOnlyNote}`
+  );
+  if (ok) {
+    void store.bulkDeleteContacts();
   }
 }
 
@@ -434,9 +584,37 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
           class="h-11 px-3.5 border-b flex items-center justify-between gap-2 text-xs shrink-0"
           :class="currentTheme.wallpaper ? 'bg-black/25 border-white/10' : 'bg-slate-900/80 border-slate-800'"
         >
-          <span class="font-semibold text-slate-200 truncate">
-            {{ store.selectedAddressBookId === 'FAVORITES' ? 'Favoritter' : 'Kontakter' }} ({{ store.filteredContacts.length }})
-          </span>
+          <div class="flex items-center gap-2 min-w-0">
+            <button
+              v-if="store.filteredContacts.length > 0"
+              type="button"
+              class="p-0.5 rounded transition shrink-0"
+              :class="allVisibleSelected ? 'text-blue-400' : 'text-slate-400 hover:text-slate-200'"
+              :title="allVisibleSelected ? 'Fravælg alle viste' : 'Markér alle viste (Ctrl+A)'"
+              @click="store.selectAllInCurrentList()"
+            >
+              <CheckSquare v-if="allVisibleSelected" class="w-4 h-4" />
+              <Square v-else class="w-4 h-4" />
+            </button>
+            <span class="font-semibold text-slate-200 truncate">
+              {{ store.selectedAddressBookId === 'FAVORITES' ? 'Favoritter' : 'Kontakter' }} ({{ store.filteredContacts.length }})
+            </span>
+            <span
+              v-if="store.selectedContactIds.length > 0"
+              class="px-1.5 py-0.5 rounded-full bg-blue-500/20 border border-blue-400/35 text-blue-300 text-[10.5px] font-semibold shrink-0"
+            >
+              {{ store.selectedContactIds.length }} valgt
+            </span>
+            <button
+              v-if="store.selectedContactIds.length > 0"
+              type="button"
+              class="text-[10.5px] text-slate-400 hover:text-white underline shrink-0"
+              title="Ryd markering (Esc)"
+              @click="store.clearSelection()"
+            >
+              Ryd
+            </button>
+          </div>
           <div class="flex items-center gap-1.5 shrink-0">
             <span v-if="store.selectedCategory !== 'ALL'" class="text-[11px] text-blue-400 truncate max-w-[110px]">
               Tag: {{ store.selectedCategory }}
@@ -497,15 +675,34 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
             :data-contact-row-id="contact.id"
             role="button"
             tabindex="0"
-            class="group w-full px-3.5 py-2.5 text-left flex items-center gap-3 transition cursor-pointer focus:outline-none"
+            class="group w-full px-3 py-2.5 text-left flex items-center gap-2.5 transition cursor-pointer focus:outline-none select-none"
             :class="
-              store.selectedContactId === contact.id
-                ? 'bg-blue-600/20 border-l-2 border-l-blue-400'
-                : 'hover:bg-white/5 border-l-2 border-l-transparent'
+              store.isContactSelected(contact.id)
+                ? 'bg-blue-500/20 border-l-2 border-l-blue-400'
+                : store.selectedContactId === contact.id
+                  ? 'bg-blue-600/15 border-l-2 border-l-blue-500/70'
+                  : 'hover:bg-white/5 border-l-2 border-l-transparent'
             "
-            @click="store.selectedContactId = contact.id"
-            @keydown.enter.prevent="store.selectedContactId = contact.id"
+            @click="handleContactRowClick(contact, $event)"
+            @keydown.enter.prevent="store.selectContact(contact)"
           >
+            <button
+              type="button"
+              class="p-0.5 rounded transition shrink-0"
+              :class="
+                store.isContactSelected(contact.id)
+                  ? 'text-blue-400 opacity-100'
+                  : store.selectedContactIds.length > 0
+                    ? 'text-slate-500 opacity-100 hover:text-slate-200'
+                    : 'text-slate-500 opacity-35 group-hover:opacity-100 focus:opacity-100 hover:text-slate-200'
+              "
+              :title="store.isContactSelected(contact.id) ? 'Fravælg kontakt' : 'Markér kontakt (Shift+Klik for område)'"
+              @click.stop="store.toggleContactCheckbox(contact, $event.shiftKey)"
+            >
+              <CheckSquare v-if="store.isContactSelected(contact.id)" class="w-4 h-4" />
+              <Square v-else class="w-4 h-4" />
+            </button>
+
             <div
               class="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-xs font-bold text-white overflow-hidden shadow-sm border border-white/15"
               :style="!resolveContactAvatarSrc(contact, 80) ? { backgroundColor: getAvatarColor(contact.fullName) } : undefined"
@@ -565,6 +762,21 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
                   'Ingen detaljer'
                 }}
               </div>
+              <div v-if="contact.categories.length > 0" class="flex items-center gap-1 mt-1 overflow-hidden">
+                <span
+                  v-for="cat in contact.categories.slice(0, 2)"
+                  :key="cat"
+                  class="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-blue-500/15 border border-blue-500/25 text-blue-300 text-[9.5px] truncate max-w-[90px]"
+                >
+                  {{ cat }}
+                </span>
+                <span
+                  v-if="contact.categories.length > 2"
+                  class="text-[9.5px] text-slate-400 shrink-0"
+                >
+                  +{{ contact.categories.length - 2 }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -594,8 +806,274 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
             : undefined
         "
       >
+        <!-- Bulk-redigering når kontakter er afkrydset -->
+        <div v-if="store.selectedContactIds.length > 0" class="p-6 max-w-2xl w-full mx-auto space-y-5">
+          <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/10">
+            <div class="flex items-center gap-3">
+              <div class="w-11 h-11 rounded-2xl bg-blue-500/20 border border-blue-400/35 flex items-center justify-center text-blue-300 shrink-0">
+                <Users class="w-5 h-5" />
+              </div>
+              <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h2 class="text-lg font-bold text-slate-100">Bulk-redigering</h2>
+                  <span class="px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-400/35 text-blue-300 text-xs font-semibold">
+                    {{ store.selectedContacts.length }} valgt
+                  </span>
+                </div>
+                <p class="text-xs text-slate-400 mt-0.5">
+                  Redigér tags, firma, favoritter eller eksportér flere kontakter på én gang.
+                </p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 flex-wrap">
+              <button
+                v-if="!allVisibleSelected && store.filteredContacts.length > 0"
+                type="button"
+                class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium transition"
+                @click="store.selectAllInCurrentList()"
+              >
+                Markér alle ({{ store.filteredContacts.length }})
+              </button>
+              <button
+                v-if="store.selectedContacts.length === 1"
+                type="button"
+                class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium transition"
+                @click="store.clearSelection()"
+              >
+                Vis kontaktkort
+              </button>
+              <button
+                type="button"
+                class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white text-xs font-medium flex items-center gap-1 transition"
+                title="Ryd markering (Esc)"
+                @click="store.clearSelection()"
+              >
+                <X class="w-3.5 h-3.5" />
+                <span>Ryd markering</span>
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="store.readOnlySelectedCount > 0"
+            class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex items-center gap-2"
+          >
+            <Lock class="w-4 h-4 text-amber-300 shrink-0" />
+            <span>
+              <strong>{{ store.readOnlySelectedCount }}</strong> af de valgte kontakter ligger i en skrivebeskyttet adressebog. Tags, firma og sletning anvendes kun på de {{ store.writableSelectedContacts.length }} skrivbare kontakter.
+            </span>
+          </div>
+
+          <!-- Valgte kontakter preview-chips -->
+          <div class="flex flex-wrap gap-1.5">
+            <span
+              v-for="c in store.selectedContacts.slice(0, 24)"
+              :key="c.id"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/90 border border-white/10 text-[11px] text-slate-200"
+            >
+              <span class="truncate max-w-[160px]">{{ c.fullName }}</span>
+              <Lock
+                v-if="store.isAddressBookReadOnly(c.addressBookId)"
+                class="w-2.5 h-2.5 text-amber-300 shrink-0"
+                title="Skrivebeskyttet"
+              />
+              <button
+                type="button"
+                class="text-slate-400 hover:text-white"
+                title="Fjern fra markering"
+                @click="store.toggleContactCheckbox(c)"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </span>
+            <span
+              v-if="store.selectedContacts.length > 24"
+              class="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-900 border border-white/10 text-[11px] text-slate-400"
+            >
+              +{{ store.selectedContacts.length - 24 }} flere
+            </span>
+          </div>
+
+          <!-- Sektion 1: Tilføj & fjern tags / grupper -->
+          <div class="p-4 rounded-2xl bg-black/25 border border-white/10 space-y-3.5 text-xs">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Tag class="w-3.5 h-3.5 text-blue-400" /> Tilføj &amp; fjern tags / grupper
+            </div>
+
+            <div class="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <input
+                v-model="bulkTagInput"
+                type="text"
+                placeholder="Skriv ét eller flere tags (kommasepareret, f.eks. Familie, Julekort)..."
+                class="flex-1 min-w-[200px] px-3 py-2 rounded-xl bg-slate-950/90 border border-slate-700/80 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                @keydown.enter.prevent="handleBulkAddTags"
+              />
+              <button
+                type="button"
+                class="px-3.5 py-2 rounded-xl dav-theme-btn text-xs font-semibold flex items-center gap-1.5 shadow transition disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
+                :disabled="
+                  store.isBulkUpdating ||
+                  parsedTagsToAdd.length === 0 ||
+                  store.writableSelectedContacts.length === 0
+                "
+                @click="handleBulkAddTags"
+              >
+                <RefreshCw v-if="store.isBulkUpdating" class="w-3.5 h-3.5 animate-spin" />
+                <Plus v-else class="w-3.5 h-3.5" />
+                <span>
+                  Tilføj {{ parsedTagsToAdd.length > 1 ? `${parsedTagsToAdd.length} tags` : 'tag' }} til {{ store.writableSelectedContacts.length }}
+                </span>
+              </button>
+            </div>
+
+            <!-- Hurtigvalg af eksisterende tags -->
+            <div v-if="store.allCategories.length > 0" class="space-y-1.5">
+              <div class="text-[11px] text-slate-400">
+                Vælg blandt eksisterende tags (klik for at tilvælge):
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="cat in store.allCategories"
+                  :key="cat.name"
+                  type="button"
+                  class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] border transition"
+                  :class="
+                    isStagedTag(cat.name)
+                      ? 'bg-blue-500/25 border-blue-400/60 text-blue-200 font-semibold'
+                      : 'bg-slate-800/70 border-slate-700/70 text-slate-300 hover:bg-slate-800'
+                  "
+                  @click="toggleStagedTag(cat.name)"
+                >
+                  <Plus v-if="!isStagedTag(cat.name)" class="w-3 h-3 opacity-70" />
+                  <CheckSquare v-else class="w-3 h-3 text-blue-300" />
+                  <span>{{ cat.name }}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Aktive tags på valgte kontakter (fjern med ét klik) -->
+            <div v-if="selectedContactsTagSummary.length > 0" class="pt-3 border-t border-white/10 space-y-1.5">
+              <div class="text-[11px] text-slate-400">
+                Tags på de valgte kontakter (klik × for at fjerne fra alle):
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <span
+                  v-for="tag in selectedContactsTagSummary"
+                  :key="tag.name"
+                  class="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-200 text-[11px]"
+                >
+                  <Tag class="w-3 h-3 text-blue-400" />
+                  <span>{{ tag.name }}</span>
+                  <span class="text-[10px] text-blue-300/75">
+                    ({{ tag.count }}/{{ store.writableSelectedContacts.length }})
+                  </span>
+                  <button
+                    type="button"
+                    class="p-0.5 rounded-full hover:bg-rose-500/30 text-blue-300 hover:text-rose-200 transition disabled:opacity-40"
+                    :disabled="store.isBulkUpdating"
+                    :title="`Fjern '${tag.name}' fra alle valgte`"
+                    @click="handleBulkRemoveTag(tag.name)"
+                  >
+                    <X class="w-3 h-3" />
+                  </button>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sektion 2: Firma / Organisation -->
+          <div class="p-4 rounded-2xl bg-black/25 border border-white/10 space-y-3 text-xs">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Building2 class="w-3.5 h-3.5 text-emerald-400" /> Sæt firma / organisation (valgfrit)
+            </div>
+            <div class="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <input
+                v-model="bulkOrgInput"
+                type="text"
+                placeholder="F.eks. Brogaard ApS"
+                class="flex-1 min-w-[180px] px-3 py-2 rounded-xl bg-slate-950/90 border border-slate-700/80 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                @keydown.enter.prevent="handleBulkSetOrganization(false)"
+              />
+              <button
+                type="button"
+                class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium transition disabled:opacity-45 shrink-0"
+                :disabled="
+                  store.isBulkUpdating ||
+                  !bulkOrgInput.trim() ||
+                  store.writableSelectedContacts.length === 0
+                "
+                @click="handleBulkSetOrganization(false)"
+              >
+                Opdater firma
+              </button>
+              <button
+                type="button"
+                class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-300 hover:text-rose-200 text-xs font-medium transition disabled:opacity-45 shrink-0"
+                :disabled="store.isBulkUpdating || store.writableSelectedContacts.length === 0"
+                @click="handleBulkSetOrganization(true)"
+              >
+                Ryd firma
+              </button>
+            </div>
+          </div>
+
+          <!-- Sektion 3: Hurtighandlinger -->
+          <div class="p-4 rounded-2xl bg-black/25 border border-white/10 space-y-3 text-xs">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Hurtighandlinger
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-amber-500/20 border border-slate-700 hover:border-amber-400/40 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition disabled:opacity-45"
+                :disabled="store.isBulkUpdating"
+                @click="store.bulkSetFavorite(true)"
+              >
+                <Star class="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                <span>Tilføj til favoritter</span>
+              </button>
+              <button
+                type="button"
+                class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition disabled:opacity-45"
+                :disabled="store.isBulkUpdating"
+                @click="store.bulkSetFavorite(false)"
+              >
+                <Star class="w-3.5 h-3.5 text-slate-400" />
+                <span>Fjern fra favoritter</span>
+              </button>
+              <button
+                v-if="suiteStore.isAnyModuleEnabled('mail') && selectedEmailRecipients.length > 0"
+                type="button"
+                class="px-3 py-2 rounded-xl dav-theme-btn text-xs font-semibold flex items-center gap-1.5 shadow transition"
+                @click="handleBulkSendEmail('bcc')"
+              >
+                <Mail class="w-3.5 h-3.5" />
+                <span>Send e-mail (BCC til {{ selectedEmailRecipients.length }})</span>
+              </button>
+              <button
+                type="button"
+                class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition"
+                @click="store.exportContactsVcf(store.selectedContacts)"
+              >
+                <Download class="w-3.5 h-3.5 text-blue-400" />
+                <span>Eksportér valgte (.vcf)</span>
+              </button>
+              <button
+                type="button"
+                class="px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/35 text-rose-200 text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-45"
+                :disabled="store.isBulkUpdating || store.writableSelectedContacts.length === 0"
+                @click="confirmBulkDelete"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+                <span>Slet valgte ({{ store.writableSelectedContacts.length }})</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div
-          v-if="!store.selectedContact"
+          v-else-if="!store.selectedContact"
           class="flex-1 flex flex-col items-center justify-center p-8 text-center select-none"
         >
           <div class="w-14 h-14 rounded-2xl bg-slate-900/80 border border-white/10 flex items-center justify-center text-slate-500 mb-3">

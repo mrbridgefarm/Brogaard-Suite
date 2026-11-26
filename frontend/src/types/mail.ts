@@ -128,6 +128,7 @@ export interface MailUndoAction {
 export interface ComposePrefill {
   to?: string[];
   cc?: string[];
+  bcc?: string[];
   subject?: string;
   textBody?: string;
 }

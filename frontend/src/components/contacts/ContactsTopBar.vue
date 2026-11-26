@@ -137,11 +137,21 @@ async function handleVcfUpload(e: Event) {
       <button
         type="button"
         class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
-        title="Eksportér viste kontakter som .vcf (vCard)"
-        @click="store.exportContactsVcf()"
+        :title="
+          store.selectedContactIds.length > 0
+            ? `Eksportér ${store.selectedContactIds.length} valgte kontakt(er) som .vcf`
+            : 'Eksportér viste kontakter som .vcf (vCard)'
+        "
+        @click="
+          store.selectedContactIds.length > 0
+            ? store.exportContactsVcf(store.selectedContacts)
+            : store.exportContactsVcf()
+        "
       >
         <Download class="w-3.5 h-3.5 text-blue-400" />
-        <span class="hidden md:inline">Eksportér</span>
+        <span class="hidden md:inline">
+          {{ store.selectedContactIds.length > 0 ? `Eksportér (${store.selectedContactIds.length})` : 'Eksportér' }}
+        </span>
       </button>
 
       <ThemePicker variant="topbar" />

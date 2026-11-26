@@ -61,6 +61,43 @@ function sendCompressedJson(req: Request, res: Response, payload: unknown) {
   res.send(jsonStr);
 }
 
+const MAX_BULK_CONTACT_ITEMS = 500;
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+  if (items.length === 0) return [];
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+
+  const runWorker = async () => {
+    while (nextIndex < items.length) {
+      const current = nextIndex++;
+      try {
+        const value = await worker(items[current]);
+        results[current] = { status: 'fulfilled', value };
+      } catch (reason) {
+        results[current] = { status: 'rejected', reason };
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
+}
+
+function hasContactIdentity(contact?: ContactDTO): boolean {
+  return Boolean(
+    contact?.fullName?.trim() ||
+      contact?.firstName?.trim() ||
+      contact?.lastName?.trim() ||
+      (contact?.emails && contact.emails.length > 0)
+  );
+}
+
 /**
  * POST /api/carddav/sync
  * Henter alle adressebøger og kontakter fra Mailcow / SOGo CardDAV.
@@ -98,14 +135,8 @@ carddavRouter.post('/contacts', async (req: Request, res: Response) => {
   try {
     const creds = requireDavCredentials(req);
     const contact = req.body?.contact as ContactDTO | undefined;
-    const hasIdentity = Boolean(
-      contact?.fullName?.trim() ||
-        contact?.firstName?.trim() ||
-        contact?.lastName?.trim() ||
-        (contact?.emails && contact.emails.length > 0)
-    );
 
-    if (!contact || !contact.addressBookId || !hasIdentity) {
+    if (!contact || !contact.addressBookId || !hasContactIdentity(contact)) {
       res.status(400).json({ ok: false, error: 'Ugyldige kontaktdata.' });
       return;
     }
@@ -132,6 +163,83 @@ carddavRouter.post('/contacts', async (req: Request, res: Response) => {
     res.status(500).json({
       ok: false,
       error: err?.message || 'Kunne ikke gemme kontakten på CardDAV-serveren.'
+    });
+  }
+});
+
+/**
+ * POST /api/carddav/contacts/bulk-update
+ * Opdaterer flere kontakter parallelt (f.eks. tags, firma m.m.) og synkroniserer evt. fødselsdagskalender én gang bagefter.
+ */
+carddavRouter.post('/contacts/bulk-update', async (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const rawContacts = req.body?.contacts;
+    if (!Array.isArray(rawContacts) || rawContacts.length === 0) {
+      res.status(400).json({ ok: false, error: 'Ingen kontakter angivet til opdatering.' });
+      return;
+    }
+    if (rawContacts.length > MAX_BULK_CONTACT_ITEMS) {
+      res.status(400).json({
+        ok: false,
+        error: `Højst ${MAX_BULK_CONTACT_ITEMS} kontakter kan opdateres ad gangen.`
+      });
+      return;
+    }
+
+    const contacts = rawContacts as ContactDTO[];
+    const validContacts: ContactDTO[] = [];
+    let failedCount = 0;
+
+    for (const c of contacts) {
+      if (!c || !c.addressBookId || !hasContactIdentity(c)) {
+        failedCount++;
+      } else {
+        validContacts.push(c);
+      }
+    }
+
+    const settled = await runWithConcurrency(validContacts, 6, async (contact) => {
+      const saved = await saveCardDavContact(creds, contact);
+      if (typeof contact.starred === 'boolean') {
+        setUserContactFavorite(creds.username, saved.id, contact.starred);
+        if (saved.uid) {
+          setUserContactFavorite(creds.username, saved.uid, contact.starred);
+        }
+        if (contact.starred) {
+          clearUserContactUnstarOverride(creds.username, saved.id);
+        }
+        saved.starred = contact.starred;
+      }
+      return saved;
+    });
+
+    const savedContacts: ContactDTO[] = [];
+    for (const item of settled) {
+      if (item.status === 'fulfilled') {
+        savedContacts.push(item.value);
+      } else {
+        failedCount++;
+      }
+    }
+
+    if (savedContacts.length > 0 && getUserContactPrefs(creds.username).birthdayCalendarSyncEnabled) {
+      await syncContactBirthdaysToCalDav(creds).catch((e) =>
+        console.warn('Kunne ikke auto-synke fødselsdagskalender efter bulk-update:', e)
+      );
+    }
+
+    res.json({
+      ok: true,
+      updatedCount: savedContacts.length,
+      failedCount,
+      contacts: savedContacts
+    });
+  } catch (err: any) {
+    console.error('Fejl ved bulk-opdatering af CardDAV kontakter:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke bulk-opdatere kontakter på CardDAV-serveren.'
     });
   }
 });
@@ -181,6 +289,84 @@ carddavRouter.post('/favorite', async (req: Request, res: Response) => {
     res.status(500).json({
       ok: false,
       error: err?.message || 'Kunne ikke opdatere favorit-status.'
+    });
+  }
+});
+
+/**
+ * POST /api/carddav/favorites/bulk
+ * Markerer eller fjerner flere kontakter som favoritter i én handling.
+ */
+carddavRouter.post('/favorites/bulk', async (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const starred = Boolean(req.body?.starred);
+    const rawItems = req.body?.items;
+
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
+      res.status(400).json({ ok: false, error: 'Ingen kontakter angivet.' });
+      return;
+    }
+    if (rawItems.length > MAX_BULK_CONTACT_ITEMS) {
+      res.status(400).json({
+        ok: false,
+        error: `Højst ${MAX_BULK_CONTACT_ITEMS} kontakter kan opdateres ad gangen.`
+      });
+      return;
+    }
+
+    const items = rawItems as Array<{ contactId?: string; contact?: ContactDTO }>;
+    const validItems = items.filter((item) => Boolean(item?.contactId || item?.contact?.id));
+    if (validItems.length === 0) {
+      res.status(400).json({ ok: false, error: 'Ingen gyldige kontakt-ID angivet.' });
+      return;
+    }
+
+    const writableTargets: ContactDTO[] = [];
+    for (const item of validItems) {
+      const effectiveId = String(item.contactId || item.contact?.id || '').trim();
+      setUserContactFavorite(creds.username, effectiveId, starred);
+      if (item.contact?.uid) {
+        setUserContactFavorite(creds.username, item.contact.uid, starred);
+      }
+      if (item.contact && item.contact.addressBookId && item.contact.vcardUrl) {
+        writableTargets.push(item.contact);
+      }
+    }
+
+    const updatedContacts: ContactDTO[] = [];
+    if (writableTargets.length > 0) {
+      const settled = await runWithConcurrency(writableTargets, 6, async (contact) => {
+        try {
+          const updated = await saveCardDavContact(creds, {
+            ...contact,
+            starred
+          });
+          updated.starred = starred;
+          return updated;
+        } catch {
+          // Skrivebeskyttet adressebog: brugerpræferencen er allerede gemt
+          return null;
+        }
+      });
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) {
+          updatedContacts.push(r.value);
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      starred,
+      updatedCount: validItems.length,
+      contacts: updatedContacts
+    });
+  } catch (err: any) {
+    console.error('Fejl ved bulk-favorit opdatering:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke opdatere favorit-status for de valgte kontakter.'
     });
   }
 });
@@ -243,6 +429,68 @@ carddavRouter.delete('/contacts', async (req: Request, res: Response) => {
     res.status(500).json({
       ok: false,
       error: err?.message || 'Kunne ikke slette kontakten på CardDAV-serveren.'
+    });
+  }
+});
+
+/**
+ * POST /api/carddav/contacts/bulk-delete
+ * Sletter flere kontakter på CardDAV-serveren og synkroniserer evt. fødselsdagskalender én gang bagefter.
+ */
+carddavRouter.post('/contacts/bulk-delete', async (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const rawItems = req.body?.items;
+
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
+      res.status(400).json({ ok: false, error: 'Ingen kontakter angivet til sletning.' });
+      return;
+    }
+    if (rawItems.length > MAX_BULK_CONTACT_ITEMS) {
+      res.status(400).json({
+        ok: false,
+        error: `Højst ${MAX_BULK_CONTACT_ITEMS} kontakter kan slettes ad gangen.`
+      });
+      return;
+    }
+
+    const items = rawItems as Array<{ id?: string; vcardUrl?: string; etag?: string }>;
+    const settled = await runWithConcurrency(items, 6, async (item) => {
+      if (item.vcardUrl) {
+        await deleteCardDavContact(creds, item.vcardUrl, item.etag);
+      }
+      return item.id || null;
+    });
+
+    const deletedIds: string[] = [];
+    let deletedCount = 0;
+    let failedCount = 0;
+    for (const r of settled) {
+      if (r.status === 'fulfilled') {
+        deletedCount++;
+        if (r.value) deletedIds.push(r.value);
+      } else {
+        failedCount++;
+      }
+    }
+
+    if (deletedCount > 0 && getUserContactPrefs(creds.username).birthdayCalendarSyncEnabled) {
+      await syncContactBirthdaysToCalDav(creds).catch((e) =>
+        console.warn('Kunne ikke auto-synke fødselsdagskalender efter bulk-delete:', e)
+      );
+    }
+
+    res.json({
+      ok: true,
+      deletedCount,
+      failedCount,
+      deletedIds
+    });
+  } catch (err: any) {
+    console.error('Fejl ved bulk-sletning af CardDAV kontakter:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke slette de valgte kontakter på CardDAV-serveren.'
     });
   }
 });

@@ -252,8 +252,8 @@ watch(
     } else if (!src || mode === 'NEW') {
       toInput.value = prefill?.to?.join(', ') || '';
       ccInput.value = prefill?.cc?.join(', ') || '';
-      bccInput.value = '';
-      showCcBcc.value = ccInput.value.length > 0;
+      bccInput.value = prefill?.bcc?.join(', ') || '';
+      showCcBcc.value = ccInput.value.length > 0 || bccInput.value.length > 0;
       subject.value = prefill?.subject || '';
       textBody.value = prefill?.textBody
         ? `${prefill.textBody}\n${sig}`

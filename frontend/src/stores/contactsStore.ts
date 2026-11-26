@@ -9,6 +9,9 @@ import {
   apiToggleContactFavorite,
   apiSaveContactCalendarColor,
   apiDeleteContact,
+  apiBulkUpdateContacts,
+  apiBulkDeleteContacts,
+  apiBulkSetFavorite,
   apiImportVcf,
   apiExportVcf
 } from '../services/carddavApi';
@@ -35,6 +38,10 @@ export const useContactsStore = defineStore('contacts', () => {
   const selectedCategory = ref<string>('ALL');
   const searchQuery = ref<string>('');
   const selectedContactId = ref<string | null>(null);
+  const selectedContactIds = ref<string[]>([]);
+  const selectionAnchorId = ref<string | null>(null);
+  const selectionFocusId = ref<string | null>(null);
+  const isBulkUpdating = ref(false);
 
   const editingContact = ref<Contact | null>(null);
   const isContactModalOpen = ref<boolean>(false);
@@ -129,6 +136,30 @@ export const useContactsStore = defineStore('contacts', () => {
     return contacts.value.find((c) => c.id === selectedContactId.value) || null;
   });
 
+  const selectedContacts = computed<Contact[]>(() => {
+    if (selectedContactIds.value.length === 0) return [];
+    const idSet = new Set(selectedContactIds.value);
+    return contacts.value
+      .filter((c) => idSet.has(c.id))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, 'da-DK'));
+  });
+
+  const writableSelectedContacts = computed<Contact[]>(() =>
+    selectedContacts.value.filter((c) => !isAddressBookReadOnly(c.addressBookId))
+  );
+
+  const readOnlySelectedCount = computed<number>(
+    () => selectedContacts.value.length - writableSelectedContacts.value.length
+  );
+
+  function isContactSelected(id: string): boolean {
+    return selectedContactIds.value.includes(id);
+  }
+
+  function clearSelection(): void {
+    selectedContactIds.value = [];
+  }
+
   function getAddressBookById(id: string): AddressBook | undefined {
     return addressBooks.value.find((b) => b.id === id);
   }
@@ -180,6 +211,9 @@ export const useContactsStore = defineStore('contacts', () => {
         if (plainContacts.length > 0) await db.contacts.bulkPut(plainContacts);
       });
 
+      selectedContactIds.value = selectedContactIds.value.filter((id) =>
+        plainContacts.some((c) => c.id === id)
+      );
       if (selectedContactId.value && !plainContacts.some((c) => c.id === selectedContactId.value)) {
         selectedContactId.value = plainContacts[0]?.id || null;
       } else if (!selectedContactId.value && plainContacts.length > 0) {
@@ -398,6 +432,7 @@ export const useContactsStore = defineStore('contacts', () => {
         await apiDeleteContact(contact.vcardUrl, contact.etag);
       }
       contacts.value = contacts.value.filter((c) => c.id !== contact.id);
+      selectedContactIds.value = selectedContactIds.value.filter((id) => id !== contact.id);
       await db.contacts.delete(contact.id).catch(() => {});
       if (selectedContactId.value === contact.id) {
         selectedContactId.value = filteredContacts.value[0]?.id || null;
@@ -507,13 +542,104 @@ export const useContactsStore = defineStore('contacts', () => {
     return results;
   }
 
-  function navigateSelection(delta: 1 | -1) {
+  function toggleContactCheckbox(contact: Contact, range = false): void {
+    const list = filteredContacts.value;
+    if (range && selectionAnchorId.value) {
+      const aIdx = list.findIndex((c) => c.id === selectionAnchorId.value);
+      const bIdx = list.findIndex((c) => c.id === contact.id);
+      if (aIdx !== -1 && bIdx !== -1) {
+        const start = Math.min(aIdx, bIdx);
+        const end = Math.max(aIdx, bIdx);
+        const rangeIds = list.slice(start, end + 1).map((c) => c.id);
+        const merged = new Set([...selectedContactIds.value, ...rangeIds]);
+        selectedContactIds.value = Array.from(merged);
+        selectionFocusId.value = contact.id;
+        selectedContactId.value = contact.id;
+        return;
+      }
+    }
+
+    if (selectedContactIds.value.includes(contact.id)) {
+      selectedContactIds.value = selectedContactIds.value.filter((id) => id !== contact.id);
+    } else {
+      selectedContactIds.value = [...selectedContactIds.value, contact.id];
+    }
+    selectionAnchorId.value = contact.id;
+    selectionFocusId.value = contact.id;
+    selectedContactId.value = contact.id;
+  }
+
+  function selectContact(
+    contact: Contact,
+    options?: { toggle?: boolean; range?: boolean }
+  ): void {
+    const list = filteredContacts.value;
+
+    if (options?.range) {
+      const anchorId = selectionAnchorId.value || selectedContactId.value || contact.id;
+      const aIdx = list.findIndex((c) => c.id === anchorId);
+      const bIdx = list.findIndex((c) => c.id === contact.id);
+      if (aIdx !== -1 && bIdx !== -1) {
+        const start = Math.min(aIdx, bIdx);
+        const end = Math.max(aIdx, bIdx);
+        selectedContactIds.value = list.slice(start, end + 1).map((c) => c.id);
+        selectionAnchorId.value = anchorId;
+        selectionFocusId.value = contact.id;
+        selectedContactId.value = contact.id;
+        return;
+      }
+    }
+
+    if (options?.toggle) {
+      if (
+        selectedContactIds.value.length === 0 &&
+        selectedContactId.value &&
+        selectedContactId.value !== contact.id
+      ) {
+        selectedContactIds.value = [selectedContactId.value, contact.id];
+      } else if (selectedContactIds.value.includes(contact.id)) {
+        selectedContactIds.value = selectedContactIds.value.filter((id) => id !== contact.id);
+      } else {
+        selectedContactIds.value = [...selectedContactIds.value, contact.id];
+      }
+      selectionAnchorId.value = contact.id;
+      selectionFocusId.value = contact.id;
+      selectedContactId.value = contact.id;
+      return;
+    }
+
+    selectedContactIds.value = [];
+    selectedContactId.value = contact.id;
+    selectionAnchorId.value = contact.id;
+    selectionFocusId.value = contact.id;
+  }
+
+  function selectAllInCurrentList(): void {
+    const visibleIds = filteredContacts.value.map((c) => c.id);
+    if (visibleIds.length === 0) return;
+
+    const currentSet = new Set(selectedContactIds.value);
+    const allVisibleSelected = visibleIds.every((id) => currentSet.has(id));
+    if (allVisibleSelected) {
+      const visibleSet = new Set(visibleIds);
+      selectedContactIds.value = selectedContactIds.value.filter((id) => !visibleSet.has(id));
+    } else {
+      for (const id of visibleIds) {
+        currentSet.add(id);
+      }
+      selectedContactIds.value = Array.from(currentSet);
+      if (!selectionAnchorId.value) selectionAnchorId.value = visibleIds[0];
+      if (!selectionFocusId.value) selectionFocusId.value = visibleIds[0];
+      if (!selectedContactId.value) selectedContactId.value = visibleIds[0];
+    }
+  }
+
+  function navigateSelection(delta: 1 | -1, extendSelection = false) {
     const list = filteredContacts.value;
     if (list.length === 0) return;
 
-    const currentIdx = selectedContactId.value
-      ? list.findIndex((c) => c.id === selectedContactId.value)
-      : -1;
+    const baseId = selectionFocusId.value || selectedContactId.value;
+    const currentIdx = baseId ? list.findIndex((c) => c.id === baseId) : -1;
     const nextIdx =
       currentIdx === -1
         ? delta > 0
@@ -521,8 +647,348 @@ export const useContactsStore = defineStore('contacts', () => {
           : list.length - 1
         : Math.max(0, Math.min(list.length - 1, currentIdx + delta));
     const target = list[nextIdx];
-    if (target) {
+    if (!target) return;
+
+    if (extendSelection) {
+      const anchorId = selectionAnchorId.value || selectedContactId.value || target.id;
+      const anchorIdx = list.findIndex((c) => c.id === anchorId);
+      if (anchorIdx !== -1) {
+        const start = Math.min(anchorIdx, nextIdx);
+        const end = Math.max(anchorIdx, nextIdx);
+        selectedContactIds.value = list.slice(start, end + 1).map((c) => c.id);
+        selectionAnchorId.value = anchorId;
+      } else {
+        selectedContactIds.value = [target.id];
+        selectionAnchorId.value = target.id;
+      }
+      selectionFocusId.value = target.id;
       selectedContactId.value = target.id;
+    } else {
+      selectedContactIds.value = [];
+      selectedContactId.value = target.id;
+      selectionAnchorId.value = target.id;
+      selectionFocusId.value = target.id;
+    }
+  }
+
+  async function bulkModifyTags(
+    addTags: string[],
+    removeTags: string[],
+    targetContacts?: Contact[]
+  ): Promise<number> {
+    const addList: string[] = [];
+    const addSeen = new Set<string>();
+    for (const raw of addTags) {
+      const clean = raw.trim();
+      const lower = clean.toLowerCase();
+      if (!clean || addSeen.has(lower)) continue;
+      addSeen.add(lower);
+      addList.push(clean);
+    }
+
+    const removeSet = new Set(
+      removeTags.map((t) => t.trim().toLowerCase()).filter(Boolean)
+    );
+    if (addList.length === 0 && removeSet.size === 0) return 0;
+
+    const sourceList = targetContacts || selectedContacts.value;
+    const targets = sourceList.filter((c) => !isAddressBookReadOnly(c.addressBookId));
+    const skippedReadOnly = sourceList.length - targets.length;
+
+    if (targets.length === 0) {
+      suiteStore.notify(
+        'Ingen skrivbare kontakter',
+        'De valgte kontakter ligger i skrivebeskyttede adressebøger og kan ikke redigeres.',
+        'warning'
+      );
+      return 0;
+    }
+
+    const changedContacts: Contact[] = [];
+    for (const c of targets) {
+      const existing = (c.categories || []).map((t) => t.trim()).filter(Boolean);
+      const nextCats = existing.filter((t) => !removeSet.has(t.toLowerCase()));
+      const existingLower = new Set(nextCats.map((t) => t.toLowerCase()));
+      for (const tag of addList) {
+        if (!existingLower.has(tag.toLowerCase())) {
+          nextCats.push(tag);
+          existingLower.add(tag.toLowerCase());
+        }
+      }
+
+      const isChanged =
+        nextCats.length !== existing.length ||
+        nextCats.some((tag, i) => tag !== existing[i]);
+      if (isChanged) {
+        changedContacts.push(
+          toPlainObject({
+            ...c,
+            categories: nextCats
+          })
+        );
+      }
+    }
+
+    if (changedContacts.length === 0) {
+      suiteStore.notify(
+        'Ingen ændringer',
+        'De valgte kontakter havde allerede de ønskede tags.',
+        'info'
+      );
+      return 0;
+    }
+
+    isBulkUpdating.value = true;
+    try {
+      const res = await apiBulkUpdateContacts(changedContacts);
+      const plainSaved = toPlainObject(res.contacts || []);
+      for (const saved of plainSaved) {
+        const idx = contacts.value.findIndex((c) => c.id === saved.id);
+        if (idx !== -1) {
+          contacts.value[idx] = saved;
+        }
+      }
+      if (plainSaved.length > 0) {
+        await db.contacts.bulkPut(plainSaved).catch(() => {});
+        contactsMutationCounter.value += 1;
+      }
+
+      const notes: string[] = [];
+      if (skippedReadOnly > 0) notes.push(`${skippedReadOnly} skrivebeskyttet(e) sprunget over`);
+      if (res.failedCount > 0) notes.push(`${res.failedCount} fejlede`);
+      const suffix = notes.length > 0 ? ` (${notes.join(', ')})` : '';
+
+      suiteStore.notify(
+        'Tags opdateret',
+        `Opdaterede tags på ${res.updatedCount} kontakt(er) i Mailcow${suffix}.`,
+        res.failedCount > 0 && res.updatedCount === 0 ? 'error' : 'success'
+      );
+      return res.updatedCount;
+    } catch (err: any) {
+      suiteStore.notify(
+        'Bulk-opdatering fejlede',
+        err?.message || 'Kunne ikke opdatere tags på de valgte kontakter.',
+        'error'
+      );
+      return 0;
+    } finally {
+      isBulkUpdating.value = false;
+    }
+  }
+
+  async function bulkUpdateFields(
+    patch: {
+      organization?: string;
+      clearOrganization?: boolean;
+      title?: string;
+      clearTitle?: boolean;
+    },
+    targetContacts?: Contact[]
+  ): Promise<number> {
+    const sourceList = targetContacts || selectedContacts.value;
+    const targets = sourceList.filter((c) => !isAddressBookReadOnly(c.addressBookId));
+    const skippedReadOnly = sourceList.length - targets.length;
+
+    if (targets.length === 0) {
+      suiteStore.notify(
+        'Ingen skrivbare kontakter',
+        'De valgte kontakter ligger i skrivebeskyttede adressebøger.',
+        'warning'
+      );
+      return 0;
+    }
+
+    const changedContacts: Contact[] = [];
+    for (const c of targets) {
+      let nextOrg = c.organization || '';
+      let nextTitle = c.title || '';
+      if (patch.clearOrganization) {
+        nextOrg = '';
+      } else if (typeof patch.organization === 'string') {
+        nextOrg = patch.organization.trim();
+      }
+      if (patch.clearTitle) {
+        nextTitle = '';
+      } else if (typeof patch.title === 'string') {
+        nextTitle = patch.title.trim();
+      }
+
+      if (nextOrg === (c.organization || '') && nextTitle === (c.title || '')) {
+        continue;
+      }
+
+      changedContacts.push(
+        toPlainObject({
+          ...c,
+          organization: nextOrg,
+          title: nextTitle
+        })
+      );
+    }
+
+    if (changedContacts.length === 0) {
+      suiteStore.notify('Ingen ændringer', 'Alle valgte kontakter havde allerede denne værdi.', 'info');
+      return 0;
+    }
+
+    isBulkUpdating.value = true;
+    try {
+      const res = await apiBulkUpdateContacts(changedContacts);
+      const plainSaved = toPlainObject(res.contacts || []);
+      for (const saved of plainSaved) {
+        const idx = contacts.value.findIndex((c) => c.id === saved.id);
+        if (idx !== -1) {
+          contacts.value[idx] = saved;
+        }
+      }
+      if (plainSaved.length > 0) {
+        await db.contacts.bulkPut(plainSaved).catch(() => {});
+        contactsMutationCounter.value += 1;
+      }
+
+      const notes: string[] = [];
+      if (skippedReadOnly > 0) notes.push(`${skippedReadOnly} skrivebeskyttet(e) sprunget over`);
+      if (res.failedCount > 0) notes.push(`${res.failedCount} fejlede`);
+      const suffix = notes.length > 0 ? ` (${notes.join(', ')})` : '';
+
+      suiteStore.notify(
+        'Kontakter opdateret',
+        `Opdaterede ${res.updatedCount} kontakt(er) i Mailcow${suffix}.`,
+        res.failedCount > 0 && res.updatedCount === 0 ? 'error' : 'success'
+      );
+      return res.updatedCount;
+    } catch (err: any) {
+      suiteStore.notify(
+        'Bulk-opdatering fejlede',
+        err?.message || 'Kunne ikke opdatere felterne på de valgte kontakter.',
+        'error'
+      );
+      return 0;
+    } finally {
+      isBulkUpdating.value = false;
+    }
+  }
+
+  async function bulkSetFavorite(
+    starred: boolean,
+    targetContacts?: Contact[]
+  ): Promise<number> {
+    const sourceList = targetContacts || selectedContacts.value;
+    const toChange = sourceList.filter((c) => Boolean(c.starred) !== starred);
+    if (toChange.length === 0) {
+      suiteStore.notify(
+        'Ingen ændringer',
+        starred
+          ? 'Alle valgte kontakter er allerede markeret som favoritter.'
+          : 'Ingen af de valgte kontakter er markeret som favoritter.',
+        'info'
+      );
+      return 0;
+    }
+
+    const payloadItems = toChange.map((c) => {
+      const writable = !isAddressBookReadOnly(c.addressBookId);
+      return {
+        contactId: c.id,
+        contact: writable ? toPlainObject({ ...c, starred }) : undefined
+      };
+    });
+
+    isBulkUpdating.value = true;
+    try {
+      const res = await apiBulkSetFavorite(starred, payloadItems);
+      const updatedMap = new Map<string, Contact>();
+      for (const uc of res.contacts || []) {
+        updatedMap.set(uc.id, toPlainObject({ ...uc, starred }));
+      }
+
+      const toPersist: Contact[] = [];
+      for (const t of toChange) {
+        const nextContact = updatedMap.get(t.id) || toPlainObject({ ...t, starred });
+        const idx = contacts.value.findIndex((c) => c.id === t.id);
+        if (idx !== -1) {
+          contacts.value[idx] = nextContact;
+        }
+        toPersist.push(nextContact);
+      }
+      if (toPersist.length > 0) {
+        await db.contacts.bulkPut(toPersist).catch(() => {});
+      }
+
+      suiteStore.notify(
+        starred ? 'Tilføjet til favoritter' : 'Fjernet fra favoritter',
+        `${toChange.length} kontakt(er) blev opdateret.`,
+        'success'
+      );
+      return res.updatedCount;
+    } catch (err: any) {
+      suiteStore.notify(
+        'Favorit-opdatering fejlede',
+        err?.message || 'Kunne ikke opdatere favorit-status.',
+        'error'
+      );
+      return 0;
+    } finally {
+      isBulkUpdating.value = false;
+    }
+  }
+
+  async function bulkDeleteContacts(targetContacts?: Contact[]): Promise<number> {
+    const sourceList = targetContacts || selectedContacts.value;
+    const targets = sourceList.filter((c) => !isAddressBookReadOnly(c.addressBookId));
+    if (targets.length === 0) {
+      suiteStore.notify(
+        'Ingen skrivbare kontakter',
+        'Ingen af de valgte kontakter kan slettes.',
+        'warning'
+      );
+      return 0;
+    }
+
+    isBulkUpdating.value = true;
+    try {
+      const res = await apiBulkDeleteContacts(
+        targets.map((c) => ({
+          id: c.id,
+          vcardUrl: c.vcardUrl,
+          etag: c.etag
+        }))
+      );
+      const removedSet = new Set(
+        res.deletedIds.length > 0
+          ? res.deletedIds
+          : res.failedCount === 0
+            ? targets.map((c) => c.id)
+            : []
+      );
+      const removedIds = Array.from(removedSet);
+
+      if (removedIds.length > 0) {
+        contacts.value = contacts.value.filter((c) => !removedSet.has(c.id));
+        selectedContactIds.value = selectedContactIds.value.filter((id) => !removedSet.has(id));
+        await db.contacts.bulkDelete(removedIds).catch(() => {});
+        if (selectedContactId.value && removedSet.has(selectedContactId.value)) {
+          selectedContactId.value = filteredContacts.value[0]?.id || null;
+        }
+        contactsMutationCounter.value += 1;
+      }
+
+      const note = res.failedCount > 0 ? ` (${res.failedCount} fejlede)` : '';
+      suiteStore.notify(
+        'Kontakter slettet',
+        `${res.deletedCount} kontakt(er) blev slettet fra adressebogen${note}.`,
+        res.failedCount > 0 && res.deletedCount === 0 ? 'error' : 'info'
+      );
+      return res.deletedCount;
+    } catch (err: any) {
+      suiteStore.notify(
+        'Kunne ikke slette kontakter',
+        err?.message || 'CardDAV fejl ved bulk-sletning.',
+        'error'
+      );
+      return 0;
+    } finally {
+      isBulkUpdating.value = false;
     }
   }
 
@@ -533,6 +999,10 @@ export const useContactsStore = defineStore('contacts', () => {
     selectedCategory.value = 'ALL';
     searchQuery.value = '';
     selectedContactId.value = null;
+    selectedContactIds.value = [];
+    selectionAnchorId.value = null;
+    selectionFocusId.value = null;
+    isBulkUpdating.value = false;
     editingContact.value = null;
     isContactModalOpen.value = false;
   }
@@ -548,7 +1018,23 @@ export const useContactsStore = defineStore('contacts', () => {
     selectedCategory,
     searchQuery,
     selectedContactId,
+    selectedContactIds,
+    selectionAnchorId,
+    selectionFocusId,
+    isBulkUpdating,
+    selectedContacts,
+    writableSelectedContacts,
+    readOnlySelectedCount,
+    isContactSelected,
+    clearSelection,
+    toggleContactCheckbox,
+    selectContact,
+    selectAllInCurrentList,
     navigateSelection,
+    bulkModifyTags,
+    bulkUpdateFields,
+    bulkSetFavorite,
+    bulkDeleteContacts,
     editingContact,
     isContactModalOpen,
     writableAddressBooks,

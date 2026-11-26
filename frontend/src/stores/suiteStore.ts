@@ -255,6 +255,30 @@ export const useSuiteStore = defineStore('suite', () => {
     mailStore.openComposeModal('NEW', null, { to: [formatted] });
   }
 
+  function composeMailToMany(
+    recipients: Array<{ email: string; name?: string }>,
+    field: 'to' | 'bcc' = 'bcc'
+  ) {
+    if (!enabledModules.value.includes('mail')) return;
+    const seen = new Set<string>();
+    const formatted: string[] = [];
+    for (const r of recipients) {
+      const cleanEmail = r.email.trim();
+      const key = cleanEmail.toLowerCase();
+      if (!cleanEmail || seen.has(key)) continue;
+      seen.add(key);
+      formatted.push(r.name?.trim() ? `${r.name.trim()} <${cleanEmail}>` : cleanEmail);
+    }
+    if (formatted.length === 0) return;
+    const mailStore = useMailStore();
+    setActiveModule('mail');
+    mailStore.openComposeModal(
+      'NEW',
+      null,
+      field === 'bcc' ? { bcc: formatted } : { to: formatted }
+    );
+  }
+
   function createEventFromMail(msg: MailDetail | MailHeader) {
     if (!enabledModules.value.includes('calendar')) return;
     const calendarStore = useCalendarStore();
@@ -298,6 +322,7 @@ export const useSuiteStore = defineStore('suite', () => {
     login,
     logout,
     composeMailTo,
+    composeMailToMany,
     createEventFromMail,
     saveSenderAsContact
   };

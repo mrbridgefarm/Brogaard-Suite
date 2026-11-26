@@ -95,6 +95,9 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     mailStore.closeContextMenu();
     calendarStore.closeContextMenu();
+    if (!isAnyModalOpen.value && suiteStore.activeModule === 'contacts' && contactsStore.selectedContactIds.length > 0) {
+      contactsStore.clearSelection();
+    }
     if (mailStore.isComposeModalOpen) mailStore.isComposeModalOpen = false;
     if (mailStore.isAliasModalOpen) mailStore.isAliasModalOpen = false;
     if (mailStore.isSieveModalOpen) mailStore.isSieveModalOpen = false;
@@ -201,12 +204,15 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
     if (isCtrlOrMeta && key === 'n') {
       e.preventDefault();
       contactsStore.openCreateContactModal();
+    } else if (isCtrlOrMeta && key === 'a') {
+      e.preventDefault();
+      contactsStore.selectAllInCurrentList();
     } else if (!isCtrlOrMeta && e.key === 'ArrowDown') {
       e.preventDefault();
-      contactsStore.navigateSelection(1);
+      contactsStore.navigateSelection(1, e.shiftKey);
     } else if (!isCtrlOrMeta && e.key === 'ArrowUp') {
       e.preventDefault();
-      contactsStore.navigateSelection(-1);
+      contactsStore.navigateSelection(-1, e.shiftKey);
     }
   }
 }

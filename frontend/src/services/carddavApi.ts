@@ -70,6 +70,67 @@ export async function apiDeleteContact(vcardUrl: string, etag?: string): Promise
   }
 }
 
+export async function apiBulkUpdateContacts(
+  contacts: Contact[]
+): Promise<{ updatedCount: number; failedCount: number; contacts: Contact[] }> {
+  const res = await fetch('/api/carddav/contacts/bulk-update', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ contacts })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke bulk-opdatere kontakter på serveren.');
+  }
+  return {
+    updatedCount: Number(data.updatedCount || 0),
+    failedCount: Number(data.failedCount || 0),
+    contacts: (data.contacts || []) as Contact[]
+  };
+}
+
+export async function apiBulkDeleteContacts(
+  items: Array<{ id: string; vcardUrl?: string; etag?: string }>
+): Promise<{ deletedCount: number; failedCount: number; deletedIds: string[] }> {
+  const res = await fetch('/api/carddav/contacts/bulk-delete', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ items })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke slette de valgte kontakter på serveren.');
+  }
+  return {
+    deletedCount: Number(data.deletedCount || 0),
+    failedCount: Number(data.failedCount || 0),
+    deletedIds: (data.deletedIds || []) as string[]
+  };
+}
+
+export async function apiBulkSetFavorite(
+  starred: boolean,
+  items: Array<{ contactId: string; contact?: Contact }>
+): Promise<{ starred: boolean; updatedCount: number; contacts: Contact[] }> {
+  const res = await fetch('/api/carddav/favorites/bulk', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ starred, items })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke opdatere favorit-status for de valgte kontakter.');
+  }
+  return {
+    starred: Boolean(data.starred),
+    updatedCount: Number(data.updatedCount || 0),
+    contacts: (data.contacts || []) as Contact[]
+  };
+}
+
 export async function apiImportVcf(
   addressBookId: string,
   vcfContent: string
