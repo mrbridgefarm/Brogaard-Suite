@@ -69,24 +69,32 @@ const sharedSearchError = ref('');
 const subscribingSharedUrl = ref<string | null>(null);
 const showSharedSuggestions = ref(false);
 
+const showLocalBirthdayCard = computed(
+  () =>
+    !store.isPublicShareMode &&
+    contactsStore.contactsWithSpecialDatesCount > 0 &&
+    !store.syncedBirthdayCalendar
+);
+
 const calendarSections = computed<Array<{ key: 'primary' | 'subscribed'; items: CalendarSource[] }>>(() => {
-  const isSub = (cal: CalendarSource) => Boolean(cal.isSubscribed || cal.id.startsWith('sub::'));
+  const isSubscriptionGroup = (cal: CalendarSource) =>
+    Boolean(cal.isSubscribed || cal.id.startsWith('sub::') || cal.isContactBirthdays);
   const primary = store.calendars
-    .filter((c) => !isSub(c))
+    .filter((c) => !isSubscriptionGroup(c))
+    .sort((a, b) => a.name.localeCompare(b.name, 'da-DK'));
+  const subscribed = store.calendars
+    .filter((c) => isSubscriptionGroup(c))
     .sort((a, b) => {
       const aIsBday = Boolean(a.isContactBirthdays);
       const bIsBday = Boolean(b.isContactBirthdays);
       if (aIsBday !== bIsBday) return aIsBday ? 1 : -1;
       return a.name.localeCompare(b.name, 'da-DK');
     });
-  const subscribed = store.calendars
-    .filter((c) => isSub(c))
-    .sort((a, b) => a.name.localeCompare(b.name, 'da-DK'));
 
   const sections: Array<{ key: 'primary' | 'subscribed'; items: CalendarSource[] }> = [
     { key: 'primary', items: primary }
   ];
-  if (subscribed.length > 0) {
+  if (subscribed.length > 0 || showLocalBirthdayCard.value) {
     sections.push({ key: 'subscribed', items: subscribed });
   }
   return sections;
@@ -701,7 +709,7 @@ function removeSingleClipboardEvent(evId: string) {
                 Abonnementer
               </span>
               <span class="text-[10px] text-slate-500">
-                {{ section.items.length }}
+                {{ section.items.length + (showLocalBirthdayCard ? 1 : 0) }}
               </span>
             </div>
 
@@ -937,7 +945,7 @@ function removeSingleClipboardEvent(evId: string) {
 
           <!-- Automatisk Fødselsdags- & Mærkedagskalender fra Brogaard Kontakter (CardDAV) -->
           <div
-            v-if="section.key === 'primary' && !store.isPublicShareMode && contactsStore.contactsWithSpecialDatesCount > 0 && !store.syncedBirthdayCalendar"
+            v-if="section.key === 'subscribed' && showLocalBirthdayCard"
             class="p-2 rounded-xl border transition space-y-2"
             :class="store.showContactBirthdays
               ? 'bg-slate-800/60 border-slate-700/70'
