@@ -347,7 +347,7 @@ function toggleLayout() {
           @click="isSyncMenuOpen = !isSyncMenuOpen"
         >
           <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin text-blue-400': store.isSyncing }" />
-          <Wifi v-if="store.isOnline" class="w-3.5 h-3.5 text-emerald-400" />
+          <Wifi v-if="store.isOnline" class="w-3.5 h-3.5 text-emerald-400 hidden sm:block" />
           <WifiOff v-else class="w-3.5 h-3.5 text-amber-400" />
           <span
             v-if="store.autoRefreshMinutes > 0"

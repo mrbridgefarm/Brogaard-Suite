@@ -537,8 +537,8 @@ defineExpose({
     @click="store.closeContextMenu()"
     @contextmenu="handleGridContextMenu"
   >
-    <!-- Valgt mål-dato & markering i toppen af gitteret -->
-    <div v-if="!store.isPublicShareMode" class="mb-2 flex items-center justify-between text-xs px-1 text-slate-400">
+    <!-- Valgt mål-dato & markering i toppen af gitteret (kun desktop) -->
+    <div v-if="!store.isPublicShareMode" class="hidden md:flex mb-2 items-center justify-between text-xs px-1 text-slate-400">
       <div class="flex items-center gap-3 flex-wrap">
         <span>
           Aktiv mål-dato (<kbd class="px-1 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl+V</kbd>):
@@ -579,7 +579,7 @@ defineExpose({
 
     <div
       :class="[
-        store.isPublicShareMode ? 'h-full' : 'h-[calc(100%-28px)]',
+        store.isPublicShareMode ? 'h-full' : 'h-full md:h-[calc(100%-28px)]',
         currentTheme.wallpaper
           ? 'rounded-2xl overflow-hidden border backdrop-blur-lg shadow-xl'
           : 'rounded-2xl overflow-hidden border border-slate-800 bg-slate-900/50 shadow-inner'

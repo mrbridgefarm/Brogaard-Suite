@@ -24,6 +24,7 @@ import {
 } from 'lucide-vue-next';
 import { useCalendarStore, type CalendarAutoRefreshMinutes } from '../../stores/calendarStore';
 import { useTheme } from '../../composables/useTheme';
+import { useViewport } from '../../composables/useViewport';
 import ThemePicker from '../shared/ThemePicker.vue';
 import SuiteModuleSwitcher from '../shared/SuiteModuleSwitcher.vue';
 import SuiteTopActions from '../shared/SuiteTopActions.vue';
@@ -45,6 +46,7 @@ const emit = defineEmits<{
 
 const store = useCalendarStore();
 const { currentTheme } = useTheme();
+const { isMobile } = useViewport();
 const isSearchFocused = ref(false);
 const isHelpOpen = ref(false);
 const isSyncMenuOpen = ref(false);
@@ -107,12 +109,14 @@ function formatShortDateTime(ev: CalendarEvent): string {
 </script>
 
 <template>
+  <!-- Desktop TopBar (uændret 1-linje layout) -->
   <header
-    class="px-2.5 sm:px-4 py-2 md:py-0 flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-3 select-none relative z-30 transition-all duration-300"
+    v-if="!isMobile"
+    class="px-3 sm:px-4 flex items-center justify-between gap-3 select-none relative z-30 transition-all duration-300"
     :class="
       currentTheme.wallpaper
-        ? 'mx-2 sm:mx-2.5 mt-2 sm:mt-2.5 min-h-14 md:h-14 rounded-2xl border backdrop-blur-xl shadow-lg'
-        : 'min-h-16 md:h-16 bg-slate-900/95 border-b border-slate-800'
+        ? 'mx-2.5 mt-2.5 h-14 rounded-2xl border backdrop-blur-xl shadow-lg'
+        : 'h-16 bg-slate-900/95 border-b border-slate-800'
     "
     :style="
       currentTheme.wallpaper
@@ -189,7 +193,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
     </div>
 
     <!-- Midt: Øjeblikkelig Lokal Søgning -->
-    <div class="relative flex-1 max-w-xs xl:max-w-md min-w-[120px] hidden sm:block">
+    <div class="relative flex-1 max-w-xs xl:max-w-md min-w-[130px]">
       <div class="relative flex items-center">
         <Search class="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
         <input
@@ -270,12 +274,12 @@ function formatShortDateTime(ev: CalendarEvent): string {
     </div>
 
     <!-- Højre -->
-    <div class="flex items-center gap-1.5 flex-wrap md:flex-nowrap justify-end shrink-0 w-full md:w-auto">
+    <div class="flex items-center gap-1.5 shrink-0">
       <button
         v-if="!store.isPublicShareMode"
         type="button"
         :disabled="store.undoStack.length === 0"
-        class="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
         title="Fortryd seneste handling (Ctrl+Z)"
         @click="store.triggerUndo()"
       >
@@ -291,7 +295,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
 
       <!-- Visningsskift -->
       <div
-        class="flex items-center p-0.5 rounded-lg border text-xs transition overflow-x-auto max-w-full"
+        class="flex items-center p-0.5 rounded-lg border text-xs transition"
         :class="currentTheme.wallpaper ? 'bg-black/30 border-white/15' : 'bg-slate-950 border-slate-800'"
       >
         <button
@@ -517,6 +521,220 @@ function formatShortDateTime(ev: CalendarEvent): string {
       </button>
 
       <SuiteTopActions v-if="!store.isPublicShareMode" />
+    </div>
+  </header>
+
+  <!-- Mobil TopBar: Stramt 2-linjers layout -->
+  <header
+    v-else
+    class="px-2.5 py-2 flex flex-col gap-2 select-none relative z-30 transition-all duration-300"
+    :class="
+      currentTheme.wallpaper
+        ? 'mx-2 mt-2 rounded-2xl border backdrop-blur-xl shadow-lg'
+        : 'bg-slate-900/95 border-b border-slate-800'
+    "
+    :style="
+      currentTheme.wallpaper
+        ? { backgroundColor: currentTheme.surface, borderColor: currentTheme.border }
+        : undefined
+    "
+  >
+    <!-- Linje 1: Sidepanel + Periode/Måned + Sync / Ny begivenhed / Log ud -->
+    <div class="flex items-center justify-between gap-1.5 w-full">
+      <div class="flex items-center gap-1.5 min-w-0 flex-1">
+        <button
+          type="button"
+          class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition shrink-0"
+          :title="props.sidebarCollapsed ? 'Vis sidepanel' : 'Skjul sidepanel'"
+          @click="emit('toggle-sidebar')"
+        >
+          <PanelLeftOpen v-if="props.sidebarCollapsed" class="w-4 h-4 text-blue-400" />
+          <PanelLeftClose v-else class="w-4 h-4" />
+        </button>
+
+        <div class="flex items-center bg-slate-800/80 rounded-lg border border-slate-700/80 p-0.5 shrink-0">
+          <button
+            type="button"
+            class="p-1.5 rounded-md hover:bg-slate-700 text-slate-300 transition"
+            title="Forrige periode"
+            @click="emit('prev')"
+          >
+            <ChevronLeft class="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            class="p-1.5 rounded-md hover:bg-slate-700 text-slate-300 transition"
+            title="Næste periode"
+            @click="emit('next')"
+          >
+            <ChevronRight class="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <h1 class="text-sm font-semibold text-slate-100 capitalize truncate min-w-0">
+          {{ props.titleText }}
+        </h1>
+      </div>
+
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button
+          v-if="store.isPublicShareMode"
+          type="button"
+          class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition flex items-center gap-1 text-xs"
+          :title="store.isOnline ? 'Online — Klik for at opdatere nu' : 'Offline'"
+          @click="store.syncWithServer(false)"
+        >
+          <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin text-blue-400': store.isSyncing }" />
+          <WifiOff v-if="!store.isOnline" class="w-3.5 h-3.5 text-amber-400" />
+        </button>
+
+        <div v-else class="relative">
+          <button
+            type="button"
+            class="px-2 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition flex items-center gap-1 text-xs"
+            :title="store.isOnline ? 'Synkronisering og auto-opdatering' : 'Offline'"
+            @click="isSyncMenuOpen = !isSyncMenuOpen"
+          >
+            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin text-blue-400': store.isSyncing }" />
+            <WifiOff v-if="!store.isOnline" class="w-3.5 h-3.5 text-amber-400" />
+            <span
+              v-if="store.autoRefreshMinutes > 0"
+              class="px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-semibold"
+            >
+              {{ store.autoRefreshMinutes }}m
+            </span>
+            <span
+              v-else
+              class="px-1.5 py-0.2 rounded-full bg-slate-700 text-slate-400 text-[10px]"
+            >
+              Man.
+            </span>
+          </button>
+
+          <div
+            v-if="isSyncMenuOpen"
+            class="fixed inset-0 z-40"
+            @click="isSyncMenuOpen = false"
+          ></div>
+
+          <div
+            v-if="isSyncMenuOpen"
+            class="absolute right-0 mt-2 w-64 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-3 z-50 text-xs space-y-2.5"
+          >
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span class="flex items-center gap-1.5 font-bold text-slate-100">
+                <Clock class="w-3.5 h-3.5 text-blue-400" />
+                Synkronisering &amp; Interval
+              </span>
+              <span v-if="formattedLastSyncedAt" class="text-[10px] text-slate-400">
+                Sidst: {{ formattedLastSyncedAt }}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              :disabled="store.isSyncing"
+              class="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold flex items-center justify-center gap-1.5 shadow transition"
+              @click="store.syncWithServer(false); isSyncMenuOpen = false"
+            >
+              <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': store.isSyncing }" />
+              <span>{{ store.isSyncing ? 'Synkroniserer...' : 'Synkronisér kalendere nu' }}</span>
+            </button>
+
+            <div class="pt-1 space-y-1">
+              <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-1">
+                Automatisk opdatering
+              </div>
+              <button
+                v-for="opt in refreshOptions"
+                :key="opt.value"
+                type="button"
+                class="w-full px-2.5 py-1.5 rounded-lg flex items-center justify-between transition"
+                :class="store.autoRefreshMinutes === opt.value
+                  ? 'bg-blue-600/20 text-blue-300 font-semibold border border-blue-500/40'
+                  : 'hover:bg-slate-800 text-slate-300'"
+                @click="store.setAutoRefreshMinutes(opt.value); isSyncMenuOpen = false"
+              >
+                <span>{{ opt.label }}</span>
+                <Check v-if="store.autoRefreshMinutes === opt.value" class="w-3.5 h-3.5 text-blue-400" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <button
+          v-if="!store.isPublicShareMode"
+          type="button"
+          class="p-2 rounded-lg dav-theme-btn text-xs font-semibold shadow-sm transition"
+          title="Opret ny begivenhed"
+          @click="store.openCreateEventModal()"
+        >
+          <Plus class="w-4 h-4" />
+        </button>
+
+        <SuiteTopActions v-if="!store.isPublicShareMode" />
+      </div>
+    </div>
+
+    <!-- Linje 2: I dag + 5 visninger + Tema -->
+    <div class="flex items-center justify-between gap-1.5 w-full">
+      <button
+        type="button"
+        class="px-2.5 py-1.5 text-[11.5px] font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition shrink-0"
+        @click="emit('today')"
+      >
+        I dag
+      </button>
+
+      <div
+        class="flex-1 flex items-center p-0.5 rounded-lg border text-[11px] transition min-w-0"
+        :class="currentTheme.wallpaper ? 'bg-black/30 border-white/15' : 'bg-slate-950 border-slate-800'"
+      >
+        <button
+          type="button"
+          class="flex-1 text-center py-1 rounded-md font-medium transition"
+          :class="store.currentView === 'multiMonthYear' ? 'dav-theme-btn font-semibold' : 'text-slate-300/80 hover:text-white'"
+          @click="emit('change-view', 'multiMonthYear')"
+        >
+          År
+        </button>
+        <button
+          type="button"
+          class="flex-1 text-center py-1 rounded-md font-medium transition"
+          :class="store.currentView === 'dayGridMonth' ? 'dav-theme-btn font-semibold' : 'text-slate-300/80 hover:text-white'"
+          @click="emit('change-view', 'dayGridMonth')"
+        >
+          Måned
+        </button>
+        <button
+          type="button"
+          class="flex-1 text-center py-1 rounded-md font-medium transition"
+          :class="store.currentView === 'timeGridWeek' ? 'dav-theme-btn font-semibold' : 'text-slate-300/80 hover:text-white'"
+          @click="emit('change-view', 'timeGridWeek')"
+        >
+          Uge
+        </button>
+        <button
+          type="button"
+          class="flex-1 text-center py-1 rounded-md font-medium transition"
+          :class="store.currentView === 'timeGridDay' ? 'dav-theme-btn font-semibold' : 'text-slate-300/80 hover:text-white'"
+          @click="emit('change-view', 'timeGridDay')"
+        >
+          Dag
+        </button>
+        <button
+          type="button"
+          class="flex-1 text-center py-1 rounded-md font-medium transition"
+          :class="store.currentView === 'listMonth' ? 'dav-theme-btn font-semibold' : 'text-slate-300/80 hover:text-white'"
+          @click="emit('change-view', 'listMonth')"
+        >
+          Liste
+        </button>
+      </div>
+
+      <div class="shrink-0">
+        <ThemePicker variant="topbar" />
+      </div>
     </div>
   </header>
 </template>

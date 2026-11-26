@@ -12,7 +12,7 @@ const suiteStore = useSuiteStore();
       :href="suiteStore.sogoUrl"
       target="_blank"
       rel="noopener noreferrer"
-      class="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-700 bg-slate-800/85 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+      class="hidden md:flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-700 bg-slate-800/85 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
       title="Åbn klassisk SOGo webmail/kalender i ny fane"
     >
       <ExternalLink class="w-3.5 h-3.5 text-sky-400" />
