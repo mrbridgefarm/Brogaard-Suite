@@ -432,3 +432,46 @@ html[data-theme="deep-space-3d"] .dav-login-card {
   font-size: 0.7rem;
   color: #64748b;
 }
+
+/* ==========================================================================
+   Mobilbrowser & PWA App Tilpasninger
+   ========================================================================== */
+.suite-app-height {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+@media (max-width: 767px) {
+  .fc .fc-col-header-cell {
+    padding: 4px 0;
+    font-size: 0.65rem;
+  }
+
+  .fc .fc-daygrid-day-number {
+    font-size: 0.68rem;
+    padding: 2px 4px;
+  }
+
+  .fc .fc-daygrid-week-number {
+    font-size: 0.58rem !important;
+    padding: 1px 4px !important;
+  }
+
+  .fc .fc-list-day-cushion {
+    padding: 6px 10px !important;
+  }
+}
+
+@media (hover: none) {
+  .touch-visible {
+    opacity: 1 !important;
+  }
+}

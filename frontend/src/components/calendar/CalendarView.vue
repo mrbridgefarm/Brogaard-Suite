@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 import CalendarTopBar from './CalendarTopBar.vue';
 import CalendarSidebar from './CalendarSidebar.vue';
 import CalendarGrid from './CalendarGrid.vue';
@@ -10,6 +10,7 @@ import ShareModal from './ShareModal.vue';
 import ImportExportModal from './ImportExportModal.vue';
 import BulkDeleteModal from './BulkDeleteModal.vue';
 import { useTheme } from '../../composables/useTheme';
+import { useViewport } from '../../composables/useViewport';
 
 const SIDEBAR_WIDTH_KEY = 'dav_sync_cal_sidebar_width_v1';
 const SIDEBAR_COLLAPSED_KEY = 'dav_sync_cal_sidebar_collapsed_v1';
@@ -18,13 +19,25 @@ const calendarGridRef = ref<InstanceType<typeof CalendarGrid> | null>(null);
 const currentTitle = ref('');
 
 const { currentTheme } = useTheme();
+const { isMobile } = useViewport();
+const mobileDrawerOpen = ref(false);
 const sidebarCollapsed = ref<boolean>(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true');
 const sidebarWidth = ref<number>(
   Math.min(420, Math.max(180, Number(localStorage.getItem(SIDEBAR_WIDTH_KEY)) || 260))
 );
 const isResizingSidebar = ref<boolean>(false);
 
+watch(isMobile, () => {
+  void nextTick(() => {
+    window.setTimeout(() => calendarGridRef.value?.updateSize(), 60);
+  });
+});
+
 function toggleSidebar() {
+  if (isMobile.value) {
+    mobileDrawerOpen.value = !mobileDrawerOpen.value;
+    return;
+  }
   sidebarCollapsed.value = !sidebarCollapsed.value;
   localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed.value));
   void nextTick(() => {
@@ -78,7 +91,7 @@ defineExpose({
   >
     <CalendarTopBar
       :title-text="currentTitle"
-      :sidebar-collapsed="sidebarCollapsed"
+      :sidebar-collapsed="isMobile ? !mobileDrawerOpen : sidebarCollapsed"
       @prev="calendarGridRef?.goPrev()"
       @next="calendarGridRef?.goNext()"
       @today="calendarGridRef?.goToday()"
@@ -87,11 +100,29 @@ defineExpose({
       @toggle-sidebar="toggleSidebar"
     />
 
+    <!-- Mobil Slide-Over Skuffe til Kalendere -->
+    <div
+      v-if="isMobile && mobileDrawerOpen"
+      class="fixed inset-0 z-40 flex"
+    >
+      <div
+        class="fixed inset-0 bg-black/65 backdrop-blur-sm"
+        @click="mobileDrawerOpen = false"
+      ></div>
+      <div class="relative z-10 w-[295px] max-w-[85vw] h-full p-2">
+        <CalendarSidebar
+          :width="280"
+          :mobile-drawer="true"
+          @close-drawer="mobileDrawerOpen = false"
+        />
+      </div>
+    </div>
+
     <div
       class="flex-1 flex min-h-0 overflow-hidden relative z-10"
-      :class="currentTheme.wallpaper ? 'px-2.5 pb-2.5 pt-2' : ''"
+      :class="currentTheme.wallpaper ? 'px-2 sm:px-2.5 pb-2 sm:pb-2.5 pt-2' : ''"
     >
-      <template v-if="!sidebarCollapsed">
+      <template v-if="!isMobile && !sidebarCollapsed">
         <CalendarSidebar :width="sidebarWidth" />
         <div
           class="cursor-col-resize transition-colors shrink-0 relative"

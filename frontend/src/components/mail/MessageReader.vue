@@ -25,7 +25,8 @@ import {
   FileCode,
   UserPlus,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  ChevronLeft
 } from 'lucide-vue-next';
 import { useMailStore } from '../../stores/mailStore';
 import { useSuiteStore } from '../../stores/suiteStore';
@@ -34,6 +35,14 @@ import { useContactsStore } from '../../stores/contactsStore';
 import { useTheme } from '../../composables/useTheme';
 import { getAttachmentDownloadUrl } from '../../services/mailApi';
 import type { MailAddress } from '../../types/mail';
+
+const props = defineProps<{
+  showMobileBack?: boolean;
+}>();
+
+const emit = defineEmits<{
+  (e: 'mobile-back'): void;
+}>();
 
 const store = useMailStore();
 const suiteStore = useSuiteStore();
@@ -332,10 +341,20 @@ function downloadIcsInvite() {
     <!-- Når en e-mail er valgt -->
     <template v-else>
       <div
-        class="h-11 px-4 border-b flex items-center justify-between gap-2 shrink-0 select-none overflow-x-auto"
+        class="h-11 px-2.5 sm:px-4 border-b flex items-center justify-between gap-2 shrink-0 select-none overflow-x-auto"
         :class="currentTheme.wallpaper ? 'bg-black/25 border-white/10' : 'bg-slate-900/80 border-slate-800'"
       >
         <div class="flex items-center gap-1.5">
+          <button
+            v-if="props.showMobileBack"
+            type="button"
+            class="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 text-xs font-semibold shrink-0 transition"
+            @click="emit('mobile-back')"
+          >
+            <ChevronLeft class="w-4 h-4" />
+            <span>Tilbage</span>
+          </button>
+
           <button
             v-if="store.isDraftMessage(msg)"
             type="button"

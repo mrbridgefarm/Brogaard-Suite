@@ -93,7 +93,7 @@ async function handleVcfUpload(e: Event) {
     </div>
 
     <!-- Midt: Øjeblikkelig Lokal Kontaktsøgning -->
-    <div class="relative flex-1 max-w-md min-w-[150px]">
+    <div class="relative flex-1 max-w-md min-w-0">
       <div class="relative flex items-center">
         <Search class="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
         <input
@@ -119,9 +119,9 @@ async function handleVcfUpload(e: Event) {
     </div>
 
     <!-- Højre: vCard Import/Eksport, Tema, Sync & Ny kontakt -->
-    <div class="flex items-center gap-1.5 sm:gap-2">
+    <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
       <label
-        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium cursor-pointer transition"
+        class="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium cursor-pointer transition"
         title="Importér kontakter fra .vcf (vCard) fil"
       >
         <Upload class="w-3.5 h-3.5 text-emerald-400" />
@@ -136,7 +136,7 @@ async function handleVcfUpload(e: Event) {
 
       <button
         type="button"
-        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+        class="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
         :title="
           store.selectedContactIds.length > 0
             ? `Eksportér ${store.selectedContactIds.length} valgte kontakt(er) som .vcf`

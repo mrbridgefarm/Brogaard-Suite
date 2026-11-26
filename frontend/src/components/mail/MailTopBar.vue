@@ -162,7 +162,7 @@ function toggleLayout() {
     </div>
 
     <!-- Midt: Øjeblikkelig Global Søgning i ALLE mapper -->
-    <div class="relative flex-1 max-w-sm xl:max-w-md min-w-[140px]">
+    <div class="relative flex-1 max-w-sm xl:max-w-md min-w-0">
       <form class="relative flex items-center" @submit.prevent="store.runServerSearch(false)">
         <Search class="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
         <input
@@ -232,7 +232,7 @@ function toggleLayout() {
     <div class="flex items-center gap-1.5 shrink-0">
       <button
         type="button"
-        class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
+        class="hidden md:inline-flex p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
         :title="store.layoutMode === 'THREE_COL' ? 'Visning: 3-kolonne Widescreen (Klik for Split-visning)' : 'Visning: Klassisk Split (Klik for 3-kolonne)'"
         @click="toggleLayout"
       >
@@ -242,7 +242,7 @@ function toggleLayout() {
 
       <button
         type="button"
-        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+        class="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
         title="Sieve Mail-Filtre & Regler (Mailcow / SOGo port 4190)"
         @click="store.openSieveModal()"
       >
@@ -252,7 +252,7 @@ function toggleLayout() {
 
       <button
         type="button"
-        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+        class="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
         title="Administrér dine afsender-aliaser og signaturer"
         @click="store.isAliasModalOpen = true"
       >
@@ -266,7 +266,7 @@ function toggleLayout() {
       <button
         type="button"
         :disabled="store.undoStack.length === 0"
-        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
+        class="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
         title="Fortryd seneste handling (Ctrl+Z)"
         @click="store.triggerUndo()"
       >
@@ -282,7 +282,7 @@ function toggleLayout() {
 
       <ThemePicker variant="topbar" />
 
-      <div class="relative">
+      <div class="relative hidden md:block">
         <button
           type="button"
           class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 transition"

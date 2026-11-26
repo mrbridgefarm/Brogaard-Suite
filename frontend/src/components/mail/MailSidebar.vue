@@ -11,18 +11,27 @@ import {
   Plus,
   AtSign,
   Pencil,
-  Filter
+  Filter,
+  X,
+  Smartphone
 } from 'lucide-vue-next';
 import { useMailStore } from '../../stores/mailStore';
 import { useTheme } from '../../composables/useTheme';
+import { useViewport } from '../../composables/useViewport';
 import type { MailFolder, MailHeader } from '../../types/mail';
 
 const props = defineProps<{
   width: number;
+  mobileDrawer?: boolean;
+}>();
+
+const emit = defineEmits<{
+  (e: 'close-drawer'): void;
 }>();
 
 const store = useMailStore();
 const { currentTheme } = useTheme();
+const { isStandalonePwa, displayModeLabel } = useViewport();
 
 const showNewFolderForm = ref(false);
 const newFolderName = ref('');
@@ -133,7 +142,7 @@ async function handleDropOnFolder(e: DragEvent, targetFolder: MailFolder) {
         : 'bg-slate-900/90'
     "
     :style="{
-      width: `${props.width}px`,
+      width: props.mobileDrawer ? '100%' : `${props.width}px`,
       ...(currentTheme.wallpaper
         ? { backgroundColor: currentTheme.surface, borderColor: currentTheme.border }
         : {})
@@ -157,6 +166,15 @@ async function handleDropOnFolder(e: DragEvent, targetFolder: MailFolder) {
               @click="showNewFolderForm = !showNewFolderForm"
             >
               <Plus class="w-3.5 h-3.5" />
+            </button>
+            <button
+              v-if="props.mobileDrawer"
+              type="button"
+              class="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition"
+              title="Luk sidepanel"
+              @click="emit('close-drawer')"
+            >
+              <X class="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -204,7 +222,7 @@ async function handleDropOnFolder(e: DragEvent, targetFolder: MailFolder) {
                 : 'bg-slate-800/50 hover:bg-slate-800 border-slate-800 text-slate-200',
               dragOverFolderPath === folder.path ? 'ring-2 ring-blue-400 bg-blue-600/30' : ''
             ]"
-            @click="store.selectFolder(folder.path)"
+            @click="store.selectFolder(folder.path); if (props.mobileDrawer) emit('close-drawer')"
             @contextmenu.prevent="store.openFolderContextMenu($event, folder)"
             @dragover="handleDragOver($event, folder.path)"
             @dragleave="handleDragLeave(folder.path)"
@@ -262,13 +280,13 @@ async function handleDropOnFolder(e: DragEvent, targetFolder: MailFolder) {
     </div>
 
     <!-- Bund: Hurtig adgang til Afsender-Aliaser & Sieve Mail-Filtre (Udklipsholder kører usynligt i baggrunden med Ctrl+C / Ctrl+X / Ctrl+V) -->
-    <div class="pt-3 border-t border-slate-800">
+    <div class="pt-3 border-t border-slate-800 space-y-2">
       <div class="grid grid-cols-2 gap-1.5">
         <button
           type="button"
           class="flex items-center justify-between px-2 py-2 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-xs text-blue-300 font-semibold transition"
           title="Administrér dine afsender-aliaser"
-          @click="store.isAliasModalOpen = true"
+          @click="store.isAliasModalOpen = true; if (props.mobileDrawer) emit('close-drawer')"
         >
           <span class="flex items-center gap-1 truncate">
             <AtSign class="w-3.5 h-3.5 text-blue-400 shrink-0" />
@@ -283,11 +301,27 @@ async function handleDropOnFolder(e: DragEvent, targetFolder: MailFolder) {
           type="button"
           class="flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/30 text-xs text-purple-300 font-semibold transition"
           title="Sieve Mail-Filtre & Regler på Mailcow/SOGo (Port 4190)"
-          @click="store.openSieveModal()"
+          @click="store.openSieveModal(); if (props.mobileDrawer) emit('close-drawer')"
         >
           <Filter class="w-3.5 h-3.5 text-purple-400 shrink-0" />
           <span class="truncate">Sieve Filtre</span>
         </button>
+      </div>
+
+      <div
+        v-if="props.mobileDrawer"
+        class="px-2.5 py-1.5 rounded-xl bg-black/25 border border-white/10 flex items-center justify-between text-[11px] text-slate-400"
+      >
+        <span class="flex items-center gap-1.5">
+          <Smartphone class="w-3.5 h-3.5 text-blue-400" />
+          <span>Visningstilstand</span>
+        </span>
+        <span
+          class="font-semibold"
+          :class="isStandalonePwa ? 'text-emerald-300' : 'text-slate-200'"
+        >
+          {{ displayModeLabel }}
+        </span>
       </div>
     </div>
   </aside>

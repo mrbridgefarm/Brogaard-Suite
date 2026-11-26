@@ -213,11 +213,11 @@ async function handleSubmit() {
   <Teleport to="body">
     <div
       v-if="store.isContactModalOpen && store.editingContact"
-      class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+      class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4"
       @click.self="store.isContactModalOpen = false"
     >
       <form
-        class="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
+        class="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[92vh]"
         @submit.prevent="handleSubmit"
       >
         <!-- Fast Header med Annullér & Gem -->

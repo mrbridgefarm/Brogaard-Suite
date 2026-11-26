@@ -108,11 +108,11 @@ function formatShortDateTime(ev: CalendarEvent): string {
 
 <template>
   <header
-    class="px-3 sm:px-4 flex items-center justify-between gap-3 select-none relative z-30 transition-all duration-300"
+    class="px-2.5 sm:px-4 py-2 md:py-0 flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-3 select-none relative z-30 transition-all duration-300"
     :class="
       currentTheme.wallpaper
-        ? 'mx-2.5 mt-2.5 h-14 rounded-2xl border backdrop-blur-xl shadow-lg'
-        : 'h-16 bg-slate-900/95 border-b border-slate-800'
+        ? 'mx-2 sm:mx-2.5 mt-2 sm:mt-2.5 min-h-14 md:h-14 rounded-2xl border backdrop-blur-xl shadow-lg'
+        : 'min-h-16 md:h-16 bg-slate-900/95 border-b border-slate-800'
     "
     :style="
       currentTheme.wallpaper
@@ -189,7 +189,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
     </div>
 
     <!-- Midt: Øjeblikkelig Lokal Søgning -->
-    <div class="relative flex-1 max-w-xs xl:max-w-md min-w-[130px]">
+    <div class="relative flex-1 max-w-xs xl:max-w-md min-w-[120px] hidden sm:block">
       <div class="relative flex items-center">
         <Search class="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
         <input
@@ -270,12 +270,12 @@ function formatShortDateTime(ev: CalendarEvent): string {
     </div>
 
     <!-- Højre -->
-    <div class="flex items-center gap-1.5 shrink-0">
+    <div class="flex items-center gap-1.5 flex-wrap md:flex-nowrap justify-end shrink-0 w-full md:w-auto">
       <button
         v-if="!store.isPublicShareMode"
         type="button"
         :disabled="store.undoStack.length === 0"
-        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
+        class="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
         title="Fortryd seneste handling (Ctrl+Z)"
         @click="store.triggerUndo()"
       >
@@ -291,7 +291,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
 
       <!-- Visningsskift -->
       <div
-        class="flex items-center p-0.5 rounded-lg border text-xs transition"
+        class="flex items-center p-0.5 rounded-lg border text-xs transition overflow-x-auto max-w-full"
         :class="currentTheme.wallpaper ? 'bg-black/30 border-white/15' : 'bg-slate-950 border-slate-800'"
       >
         <button
@@ -349,7 +349,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
 
       <ThemePicker variant="topbar" />
 
-      <div v-if="!store.isPublicShareMode" class="relative">
+      <div v-if="!store.isPublicShareMode" class="relative hidden md:block">
         <button
           type="button"
           class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 transition"

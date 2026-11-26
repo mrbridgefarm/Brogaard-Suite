@@ -21,6 +21,11 @@ const props = defineProps<{
   width?: number;
   height?: number;
   splitMode?: boolean;
+  fullWidth?: boolean;
+}>();
+
+const emit = defineEmits<{
+  (e: 'open-message', msg: MailHeader): void;
 }>();
 
 const store = useMailStore();
@@ -85,6 +90,7 @@ function handleRowClick(e: MouseEvent, msg: MailHeader) {
     void store.openMessage(msg, true);
   } else {
     void store.openMessage(msg, false);
+    emit('open-message', msg);
   }
 }
 
@@ -139,9 +145,9 @@ function formatSmartDate(iso: string): string {
 
 <template>
   <section
-    class="flex flex-col shrink-0 select-none overflow-hidden transition-all duration-300"
+    class="flex flex-col select-none overflow-hidden transition-all duration-300"
     :class="[
-      props.splitMode ? 'w-full' : 'h-full',
+      props.fullWidth ? 'w-full flex-1 h-full' : props.splitMode ? 'w-full shrink-0' : 'h-full shrink-0',
       currentTheme.wallpaper
         ? 'rounded-2xl border backdrop-blur-lg shadow-xl'
         : props.splitMode
@@ -149,7 +155,11 @@ function formatSmartDate(iso: string): string {
           : 'bg-slate-950 border-r border-slate-800'
     ]"
     :style="{
-      ...(props.splitMode ? { height: `${props.height || 280}px` } : { width: `${props.width || 380}px` }),
+      ...(props.fullWidth
+        ? {}
+        : props.splitMode
+          ? { height: `${props.height || 280}px` }
+          : { width: `${props.width || 380}px` }),
       ...(currentTheme.wallpaper
         ? { backgroundColor: currentTheme.gridBg, borderColor: currentTheme.border }
         : {})

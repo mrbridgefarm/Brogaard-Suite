@@ -519,10 +519,10 @@ async function handleDiscardDraft() {
   <Teleport to="body">
     <div
       v-if="store.isComposeModalOpen"
-      class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5"
+      class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-0 sm:p-5"
       @click.self="store.isComposeModalOpen = false"
     >
-      <div class="w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
+      <div class="w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-none sm:rounded-2xl shadow-2xl flex flex-col h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-hidden">
         <!-- Header -->
         <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
           <div class="flex items-center gap-2.5">

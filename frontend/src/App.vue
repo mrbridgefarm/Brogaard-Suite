@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import LoginModal from './components/shared/LoginModal.vue';
+import MobileBottomNav from './components/shared/MobileBottomNav.vue';
 import MailView from './components/mail/MailView.vue';
 import CalendarView from './components/calendar/CalendarView.vue';
 import ContactsView from './components/contacts/ContactsView.vue';
@@ -228,7 +229,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative">
+  <div class="suite-app-height w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative">
     <!-- Fælles tema-baggrundsbillede & stemningsoverlay -->
     <div
       v-if="currentTheme.wallpaper"
@@ -279,12 +280,14 @@ onUnmounted(() => {
       />
     </div>
 
+    <MobileBottomNav />
+
     <!-- Globale Modaler -->
     <LoginModal />
     <ContactModal />
 
     <!-- Samlede Toast Notifikationer -->
-    <div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+    <div class="fixed bottom-20 md:bottom-4 left-3 right-3 md:left-auto md:right-4 z-50 flex flex-col gap-2 md:max-w-sm md:w-full pointer-events-none">
       <div
         v-for="t in suiteStore.toasts"
         :key="t.id"

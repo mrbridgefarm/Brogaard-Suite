@@ -22,7 +22,8 @@ import {
   Search,
   UserPlus,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  Smartphone
 } from 'lucide-vue-next';
 import {
   useCalendarStore,
@@ -33,6 +34,7 @@ import {
   DEFAULT_CONTACT_CALENDAR_COLOR
 } from '../../stores/contactsStore';
 import { useTheme } from '../../composables/useTheme';
+import { useViewport } from '../../composables/useViewport';
 import { requestNotificationPermission } from '../../services/notifications';
 import type {
   CalendarEvent,
@@ -43,10 +45,16 @@ import { ref, computed, nextTick } from 'vue';
 
 const props = defineProps<{
   width: number;
+  mobileDrawer?: boolean;
+}>();
+
+const emit = defineEmits<{
+  (e: 'close-drawer'): void;
 }>();
 
 const store = useCalendarStore();
 const contactsStore = useContactsStore();
+const { isStandalonePwa, displayModeLabel } = useViewport();
 const notifPermission = ref<string>(
   typeof window !== 'undefined' && 'Notification' in window
     ? Notification.permission
@@ -367,7 +375,7 @@ function removeSingleClipboardEvent(evId: string) {
         : 'bg-slate-900/90'
     "
     :style="{
-      width: `${props.width}px`,
+      width: props.mobileDrawer ? '100%' : `${props.width}px`,
       ...(currentTheme.wallpaper
         ? { backgroundColor: currentTheme.surface, borderColor: currentTheme.border }
         : {})
@@ -384,6 +392,15 @@ function removeSingleClipboardEvent(evId: string) {
             <span class="text-[11px] text-slate-500">
               {{ store.calendars.length }}
             </span>
+            <button
+              v-if="props.mobileDrawer"
+              type="button"
+              class="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition"
+              title="Luk kalenderpanel"
+              @click="emit('close-drawer')"
+            >
+              <X class="w-3.5 h-3.5" />
+            </button>
             <button
               v-if="!store.isPublicShareMode"
               type="button"
@@ -1200,6 +1217,22 @@ function removeSingleClipboardEvent(evId: string) {
         <Bell class="w-3.5 h-3.5 shrink-0" />
         <span class="truncate">Aktivér påmindelser</span>
       </button>
+
+      <div
+        v-if="props.mobileDrawer"
+        class="px-2.5 py-1.5 rounded-xl bg-black/25 border border-white/10 flex items-center justify-between text-[11px] text-slate-400"
+      >
+        <span class="flex items-center gap-1.5">
+          <Smartphone class="w-3.5 h-3.5 text-blue-400" />
+          <span>Visningstilstand</span>
+        </span>
+        <span
+          class="font-semibold"
+          :class="isStandalonePwa ? 'text-emerald-300' : 'text-slate-200'"
+        >
+          {{ displayModeLabel }}
+        </span>
+      </div>
     </div>
   </aside>
 </template>

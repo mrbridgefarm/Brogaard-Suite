@@ -23,12 +23,15 @@ import {
   Square,
   X,
   Download,
-  RefreshCw
+  RefreshCw,
+  ChevronLeft,
+  Smartphone
 } from 'lucide-vue-next';
 import ContactsTopBar from './ContactsTopBar.vue';
 import { useContactsStore } from '../../stores/contactsStore';
 import { useSuiteStore } from '../../stores/suiteStore';
 import { useTheme } from '../../composables/useTheme';
+import { useViewport } from '../../composables/useViewport';
 import { processContactPhotoFile } from '../../utils/contactPhoto';
 import { resolveContactAvatarSrc, markGravatarFailed } from '../../utils/gravatar';
 import type { Contact } from '../../types/contacts';
@@ -40,6 +43,10 @@ const SIDEBAR_COLLAPSED_KEY = 'brogaard_contacts_sidebar_collapsed_v1';
 const store = useContactsStore();
 const suiteStore = useSuiteStore();
 const { currentTheme } = useTheme();
+const { isMobile, isStandalonePwa, displayModeLabel } = useViewport();
+
+const mobileDrawerOpen = ref(false);
+const mobilePane = ref<'list' | 'detail'>('list');
 
 const sidebarCollapsed = ref<boolean>(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true');
 const sidebarWidth = ref<number>(
@@ -136,8 +143,28 @@ watch(
 );
 
 function toggleSidebar() {
+  if (isMobile.value) {
+    mobileDrawerOpen.value = !mobileDrawerOpen.value;
+    return;
+  }
   sidebarCollapsed.value = !sidebarCollapsed.value;
   localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed.value));
+}
+
+function selectBookFilter(bookId: string) {
+  store.selectedAddressBookId = bookId;
+  if (isMobile.value) {
+    mobileDrawerOpen.value = false;
+    mobilePane.value = 'list';
+  }
+}
+
+function selectTagFilter(catName: string) {
+  store.selectedCategory = store.selectedCategory === catName ? 'ALL' : catName;
+  if (isMobile.value) {
+    mobileDrawerOpen.value = false;
+    mobilePane.value = 'list';
+  }
 }
 
 function startResizeSidebar(e: MouseEvent) {
@@ -303,6 +330,9 @@ function handleContactRowClick(contact: Contact, e: MouseEvent) {
     return;
   }
   store.selectContact(contact);
+  if (isMobile.value) {
+    mobilePane.value = 'detail';
+  }
 }
 
 function isStagedTag(tagName: string): boolean {
@@ -398,25 +428,40 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
     :class="{ 'select-none': isResizing }"
   >
     <ContactsTopBar
-      :sidebar-collapsed="sidebarCollapsed"
+      :sidebar-collapsed="isMobile ? !mobileDrawerOpen : sidebarCollapsed"
       @toggle-sidebar="toggleSidebar"
     />
 
+    <!-- Backdrop for mobil slide-over skuffe -->
     <div
-      class="flex-1 flex min-h-0 overflow-hidden relative z-10"
-      :class="currentTheme.wallpaper ? 'px-2.5 pb-2.5 pt-2' : ''"
+      v-if="isMobile && mobileDrawerOpen"
+      class="fixed inset-0 z-40 bg-black/65 backdrop-blur-sm"
+      @click="mobileDrawerOpen = false"
+    ></div>
+
+    <div
+      class="flex-1 flex min-h-0 overflow-hidden relative"
+      :class="[
+        currentTheme.wallpaper ? 'px-2 sm:px-2.5 pb-2 sm:pb-2.5 pt-2' : '',
+        isMobile && mobileDrawerOpen ? 'z-50' : 'z-10'
+      ]"
     >
-      <!-- Venstre sidepanel: Adressebøger & Grupper -->
-      <template v-if="!sidebarCollapsed">
+      <!-- Venstre sidepanel: Adressebøger & Grupper (Desktop fast / Mobil slide-over skuffe) -->
+      <template v-if="isMobile ? mobileDrawerOpen : !sidebarCollapsed">
         <aside
-          class="flex flex-col justify-between p-3 select-none overflow-y-auto shrink-0 h-full transition-all duration-300"
-          :class="
-            currentTheme.wallpaper
-              ? 'rounded-2xl border backdrop-blur-xl shadow-lg'
-              : 'bg-slate-900/90 border-r border-slate-800'
-          "
+          class="flex flex-col justify-between p-3 select-none overflow-y-auto shrink-0 transition-all duration-300"
+          :class="[
+            isMobile
+              ? 'fixed left-2 top-2 bottom-2 z-50 rounded-2xl border backdrop-blur-xl shadow-2xl'
+              : 'h-full',
+            !isMobile &&
+              (currentTheme.wallpaper
+                ? 'rounded-2xl border backdrop-blur-xl shadow-lg'
+                : 'bg-slate-900/90 border-r border-slate-800'),
+            isMobile && !currentTheme.wallpaper ? 'bg-slate-900/95 border-slate-700' : ''
+          ]"
           :style="{
-            width: `${sidebarWidth}px`,
+            width: isMobile ? 'min(285px, 85vw)' : `${sidebarWidth}px`,
             ...(currentTheme.wallpaper
               ? { backgroundColor: currentTheme.surface, borderColor: currentTheme.border }
               : {})
@@ -429,9 +474,20 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
                 <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   Adressebøger
                 </span>
-                <span class="text-[10px] text-slate-500">
-                  {{ store.addressBooks.length }}
-                </span>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] text-slate-500">
+                    {{ store.addressBooks.length }}
+                  </span>
+                  <button
+                    v-if="isMobile"
+                    type="button"
+                    class="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                    title="Luk sidepanel"
+                    @click="mobileDrawerOpen = false"
+                  >
+                    <X class="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               <button
@@ -442,7 +498,7 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
                     ? 'dav-theme-btn font-semibold shadow-sm'
                     : 'text-slate-200 hover:bg-white/10'
                 "
-                @click="store.selectedAddressBookId = 'ALL'"
+                @click="selectBookFilter('ALL')"
               >
                 <span class="flex items-center gap-2 truncate">
                   <Users class="w-3.5 h-3.5 shrink-0" />
@@ -461,8 +517,9 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
                     : 'text-slate-200 hover:bg-white/10'
                 "
                 @click="
-                  store.selectedAddressBookId =
+                  selectBookFilter(
                     store.selectedAddressBookId === 'FAVORITES' ? 'ALL' : 'FAVORITES'
+                  )
                 "
               >
                 <span class="flex items-center gap-2 truncate">
@@ -489,7 +546,7 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
                     ? 'dav-theme-btn font-semibold shadow-sm'
                     : 'text-slate-200 hover:bg-white/10'
                 "
-                @click="store.selectedAddressBookId = book.id"
+                @click="selectBookFilter(book.id)"
               >
                 <span class="flex items-center gap-2 min-w-0">
                   <BookUser class="w-3.5 h-3.5 shrink-0" />
@@ -510,7 +567,7 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
                   v-if="store.selectedCategory !== 'ALL'"
                   type="button"
                   class="text-[10px] text-blue-400 hover:underline"
-                  @click="store.selectedCategory = 'ALL'"
+                  @click="store.selectedCategory = 'ALL'; if (isMobile) mobileDrawerOpen = false"
                 >
                   Nulstil
                 </button>
@@ -527,10 +584,7 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
                       ? 'dav-theme-btn border-transparent font-semibold'
                       : 'bg-slate-800/70 border-slate-700/70 text-slate-300 hover:bg-slate-800'
                   "
-                  @click="
-                    store.selectedCategory =
-                      store.selectedCategory === cat.name ? 'ALL' : cat.name
-                  "
+                  @click="selectTagFilter(cat.name)"
                 >
                   <Tag class="w-3 h-3" />
                   <span>{{ cat.name }}</span>
@@ -540,7 +594,7 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
             </div>
           </div>
 
-          <!-- Bund: Fødselsdage & Mærkedage-status -->
+          <!-- Bund: Fødselsdage & Mærkedage-status + visningstilstand -->
           <div class="pt-3 border-t border-white/10 space-y-2">
             <div
               v-if="store.contactsWithSpecialDatesCount > 0"
@@ -551,10 +605,27 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
                 <strong>{{ store.contactsWithSpecialDatesCount }}</strong> kontakt(er) med fødselsdag/mærkedag vises automatisk i din kalender.
               </span>
             </div>
+
+            <div
+              v-if="isMobile"
+              class="px-2.5 py-1.5 rounded-xl bg-black/25 border border-white/10 flex items-center justify-between text-[11px] text-slate-400"
+            >
+              <span class="flex items-center gap-1.5">
+                <Smartphone class="w-3.5 h-3.5 text-blue-400" />
+                <span>Visningstilstand</span>
+              </span>
+              <span
+                class="font-semibold"
+                :class="isStandalonePwa ? 'text-emerald-300' : 'text-slate-200'"
+              >
+                {{ displayModeLabel }}
+              </span>
+            </div>
           </div>
         </aside>
 
         <div
+          v-if="!isMobile"
           class="cursor-col-resize transition-colors shrink-0 relative"
           :class="currentTheme.wallpaper ? 'w-2 bg-transparent hover:bg-white/15 active:bg-white/25 rounded-full my-2' : 'w-1.5 bg-slate-800/80 hover:bg-blue-500 active:bg-blue-400'"
           title="Træk for at tilpasse sidepanelets bredde (dobbeltklik for standardbredde)"
@@ -567,14 +638,16 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
 
       <!-- Midterste kolonne: Kontaktliste (A-Å) -->
       <section
-        class="flex flex-col min-h-0 overflow-hidden shrink-0 transition-all duration-300"
-        :class="
+        v-if="!isMobile || mobilePane === 'list'"
+        class="flex flex-col min-h-0 overflow-hidden transition-all duration-300"
+        :class="[
+          isMobile ? 'w-full flex-1' : 'shrink-0',
           currentTheme.wallpaper
             ? 'rounded-2xl border backdrop-blur-lg shadow-xl'
             : 'bg-slate-900/60 border-r border-slate-800'
-        "
+        ]"
         :style="{
-          width: `${listWidth}px`,
+          ...(!isMobile ? { width: `${listWidth}px` } : {}),
           ...(currentTheme.wallpaper
             ? { backgroundColor: currentTheme.gridBg, borderColor: currentTheme.border }
             : {})
@@ -648,6 +721,23 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
               <span>Favoritter</span>
             </button>
           </div>
+        </div>
+
+        <!-- Mobil Bulk-handlingsbjælke når kontakter er afkrydset -->
+        <div
+          v-if="isMobile && store.selectedContactIds.length > 0"
+          class="px-3.5 py-2 border-b border-blue-400/25 bg-blue-500/15 flex items-center justify-between gap-2 text-xs shrink-0"
+        >
+          <span class="font-semibold text-blue-200">
+            {{ store.selectedContactIds.length }} kontakt(er) markeret
+          </span>
+          <button
+            type="button"
+            class="px-3 py-1 rounded-lg dav-theme-btn text-xs font-semibold shadow-sm"
+            @click="mobilePane = 'detail'"
+          >
+            Bulk-redigér →
+          </button>
         </div>
 
         <div v-if="store.filteredContacts.length === 0" class="flex-1 flex flex-col items-center justify-center p-6 text-center text-xs text-slate-400 space-y-3">
@@ -783,6 +873,7 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
       </section>
 
       <div
+        v-if="!isMobile"
         class="cursor-col-resize transition-colors shrink-0 relative"
         :class="currentTheme.wallpaper ? 'w-2 bg-transparent hover:bg-white/15 active:bg-white/25 rounded-full my-2' : 'w-1.5 bg-slate-800/80 hover:bg-blue-500 active:bg-blue-400'"
         title="Træk for at tilpasse kontaktlistens bredde (dobbeltklik for standardbredde)"
@@ -794,6 +885,7 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
 
       <!-- Højre kolonne: Kontaktkort -->
       <main
+        v-if="!isMobile || mobilePane === 'detail'"
         class="flex-1 flex flex-col min-w-0 h-full overflow-y-auto transition-all duration-300"
         :class="
           currentTheme.wallpaper
@@ -806,6 +898,27 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
             : undefined
         "
       >
+        <div
+          v-if="isMobile"
+          class="h-11 px-3 border-b flex items-center justify-between gap-2 shrink-0 sticky top-0 z-20 backdrop-blur-md"
+          :class="currentTheme.wallpaper ? 'bg-black/35 border-white/10' : 'bg-slate-900/90 border-slate-800'"
+        >
+          <button
+            type="button"
+            class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 text-xs font-semibold transition"
+            @click="mobilePane = 'list'"
+          >
+            <ChevronLeft class="w-4 h-4" />
+            <span>Tilbage til kontakter</span>
+          </button>
+          <span
+            v-if="store.selectedContactIds.length > 0"
+            class="text-[11px] font-semibold text-blue-300"
+          >
+            {{ store.selectedContactIds.length }} valgt
+          </span>
+        </div>
+
         <!-- Bulk-redigering når kontakter er afkrydset -->
         <div v-if="store.selectedContactIds.length > 0" class="p-6 max-w-2xl w-full mx-auto space-y-5">
           <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/10">

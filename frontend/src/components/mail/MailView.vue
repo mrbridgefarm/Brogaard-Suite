@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import MailTopBar from './MailTopBar.vue';
 import MailSidebar from './MailSidebar.vue';
 import MessageList from './MessageList.vue';
@@ -10,6 +10,7 @@ import AliasModal from './AliasModal.vue';
 import SieveModal from './SieveModal.vue';
 import { useMailStore } from '../../stores/mailStore';
 import { useTheme } from '../../composables/useTheme';
+import { useViewport } from '../../composables/useViewport';
 
 const SIDEBAR_WIDTH_KEY = 'imap_sync_mail_sidebar_width_v1';
 const SIDEBAR_COLLAPSED_KEY = 'imap_sync_mail_sidebar_collapsed_v1';
@@ -18,6 +19,10 @@ const MSGLIST_HEIGHT_KEY = 'imap_sync_mail_msglist_height_v1';
 
 const store = useMailStore();
 const { currentTheme } = useTheme();
+const { isMobile } = useViewport();
+
+const mobileDrawerOpen = ref(false);
+const mobileShowReader = ref(false);
 
 const sidebarCollapsed = ref<boolean>(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true');
 const sidebarWidth = ref<number>(
@@ -31,7 +36,27 @@ const msgListHeight = ref<number>(
 );
 const isResizing = ref<boolean>(false);
 
+watch(
+  () => store.activeFolderPath,
+  () => {
+    mobileShowReader.value = false;
+  }
+);
+
+watch(
+  () => store.activeMessageId,
+  (id) => {
+    if (!id) {
+      mobileShowReader.value = false;
+    }
+  }
+);
+
 function toggleSidebar() {
+  if (isMobile.value) {
+    mobileDrawerOpen.value = !mobileDrawerOpen.value;
+    return;
+  }
   sidebarCollapsed.value = !sidebarCollapsed.value;
   localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed.value));
 }
@@ -124,15 +149,33 @@ function resetMsgListHeight() {
     :class="{ 'select-none': isResizing }"
   >
     <MailTopBar
-      :sidebar-collapsed="sidebarCollapsed"
+      :sidebar-collapsed="isMobile ? !mobileDrawerOpen : sidebarCollapsed"
       @toggle-sidebar="toggleSidebar"
     />
 
+    <!-- Mobil Slide-Over Skuffe til IMAP Mapper -->
+    <div
+      v-if="isMobile && mobileDrawerOpen"
+      class="fixed inset-0 z-40 flex"
+    >
+      <div
+        class="fixed inset-0 bg-black/65 backdrop-blur-sm"
+        @click="mobileDrawerOpen = false"
+      ></div>
+      <div class="relative z-10 w-[285px] max-w-[85vw] h-full p-2">
+        <MailSidebar
+          :width="270"
+          :mobile-drawer="true"
+          @close-drawer="mobileDrawerOpen = false"
+        />
+      </div>
+    </div>
+
     <div
       class="flex-1 flex min-h-0 overflow-hidden relative z-10"
-      :class="currentTheme.wallpaper ? 'px-2.5 pb-2.5 pt-2' : ''"
+      :class="currentTheme.wallpaper ? 'px-2 sm:px-2.5 pb-2 sm:pb-2.5 pt-2' : ''"
     >
-      <template v-if="!sidebarCollapsed">
+      <template v-if="!isMobile && !sidebarCollapsed">
         <MailSidebar :width="sidebarWidth" />
         <div
           class="cursor-col-resize transition-colors shrink-0 relative"
@@ -145,8 +188,23 @@ function resetMsgListHeight() {
         </div>
       </template>
 
-      <!-- Layout A: 3-Kolonne Widescreen -->
-      <template v-if="store.layoutMode === 'THREE_COL'">
+      <!-- Mobil: 1-rude Liste -> Detalje -->
+      <template v-if="isMobile">
+        <MessageReader
+          v-if="mobileShowReader && store.activeMessageId"
+          :show-mobile-back="true"
+          @mobile-back="mobileShowReader = false"
+        />
+        <MessageList
+          v-else
+          :full-width="true"
+          :split-mode="false"
+          @open-message="mobileShowReader = true"
+        />
+      </template>
+
+      <!-- Desktop Layout A: 3-Kolonne Widescreen -->
+      <template v-else-if="store.layoutMode === 'THREE_COL'">
         <MessageList :width="msgListWidth" :split-mode="false" />
         <div
           class="cursor-col-resize transition-colors shrink-0 relative"
@@ -160,7 +218,7 @@ function resetMsgListHeight() {
         <MessageReader />
       </template>
 
-      <!-- Layout B: Klassisk Split-View -->
+      <!-- Desktop Layout B: Klassisk Split-View -->
       <div v-else class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         <MessageList :height="msgListHeight" :split-mode="true" />
         <div

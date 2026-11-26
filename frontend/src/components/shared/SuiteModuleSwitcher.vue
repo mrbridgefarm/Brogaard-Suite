@@ -25,10 +25,10 @@ const { currentTheme } = useTheme();
       ></span>
     </div>
 
-    <!-- Segmenteret Modulskifter: Mail / Kalender / Kontakter -->
+    <!-- Segmenteret Modulskifter: Mail / Kalender / Kontakter (skjules på mobil hvor bundmenuen bruges) -->
     <nav
       aria-label="Brogaard Suite Moduler"
-      class="flex items-center p-0.5 rounded-xl border text-xs transition shrink-0"
+      class="hidden md:flex items-center p-0.5 rounded-xl border text-xs transition shrink-0"
       :class="currentTheme.wallpaper ? 'bg-black/30 border-white/15' : 'bg-slate-950 border-slate-800'"
     >
       <button

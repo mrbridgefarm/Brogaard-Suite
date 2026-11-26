@@ -212,10 +212,10 @@ const safeVideoUrl = computed(() => {
   <Teleport to="body">
     <div
       v-if="store.isEventModalOpen && store.editingEvent"
-      class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+      class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4"
       @click.self="store.isEventModalOpen = false"
     >
-      <div class="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh]">
         <!-- Header -->
         <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -293,7 +293,7 @@ const safeVideoUrl = computed(() => {
           </div>
 
           <!-- Dato & Klokkeslæt -->
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-slate-400 font-medium mb-1">Start</label>
               <div class="flex gap-2">
