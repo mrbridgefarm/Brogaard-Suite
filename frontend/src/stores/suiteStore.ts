@@ -72,6 +72,21 @@ export const useSuiteStore = defineStore('suite', () => {
     toasts.value = toasts.value.filter((t) => t.id !== id);
   }
 
+  function resetUrlToRoot() {
+    const defaultMod = enabledModules.value[0] || 'mail';
+    activeModule.value = defaultMod;
+    visitedModules.value = {
+      mail: defaultMod === 'mail',
+      calendar: defaultMod === 'calendar',
+      contacts: defaultMod === 'contacts'
+    };
+    if (typeof window !== 'undefined' && !window.location.search.includes('share=')) {
+      if (window.location.pathname !== '/' || window.location.search || window.location.hash) {
+        window.history.replaceState(null, '', '/');
+      }
+    }
+  }
+
   function setActiveModule(mod: SuiteModule) {
     if (isPublicShareMode.value && mod !== 'calendar') return;
     if (!enabledModules.value.includes(mod)) return;
@@ -158,11 +173,13 @@ export const useSuiteStore = defineStore('suite', () => {
         ]);
       } else {
         isAuthenticated.value = false;
+        resetUrlToRoot();
         await clearAllSuiteCaches().catch(() => {});
         isLoginModalOpen.value = true;
       }
     } catch {
       isAuthenticated.value = false;
+      resetUrlToRoot();
       isLoginModalOpen.value = true;
     }
   }
@@ -203,6 +220,7 @@ export const useSuiteStore = defineStore('suite', () => {
         contactsStore.syncWithServer(true)
       ]);
 
+      setActiveModule(activeModule.value);
       notify('Logget ind i Brogaard Suite', `Velkommen ${res.username}`, 'success');
     } finally {
       isLoggingIn.value = false;
@@ -224,6 +242,7 @@ export const useSuiteStore = defineStore('suite', () => {
     contactsStore.resetState();
 
     await clearAllSuiteCaches().catch(() => {});
+    resetUrlToRoot();
     isLoginModalOpen.value = true;
   }
 
