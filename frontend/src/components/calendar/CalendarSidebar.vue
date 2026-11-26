@@ -69,14 +69,28 @@ const sharedSearchError = ref('');
 const subscribingSharedUrl = ref<string | null>(null);
 const showSharedSuggestions = ref(false);
 
-const sortedCalendars = computed(() =>
-  [...store.calendars].sort((a, b) => {
-    const aIsBday = Boolean(a.isContactBirthdays);
-    const bIsBday = Boolean(b.isContactBirthdays);
-    if (aIsBday !== bIsBday) return aIsBday ? 1 : -1;
-    return a.name.localeCompare(b.name, 'da-DK');
-  })
-);
+const calendarSections = computed<Array<{ key: 'primary' | 'subscribed'; items: CalendarSource[] }>>(() => {
+  const isSub = (cal: CalendarSource) => Boolean(cal.isSubscribed || cal.id.startsWith('sub::'));
+  const primary = store.calendars
+    .filter((c) => !isSub(c))
+    .sort((a, b) => {
+      const aIsBday = Boolean(a.isContactBirthdays);
+      const bIsBday = Boolean(b.isContactBirthdays);
+      if (aIsBday !== bIsBday) return aIsBday ? 1 : -1;
+      return a.name.localeCompare(b.name, 'da-DK');
+    });
+  const subscribed = store.calendars
+    .filter((c) => isSub(c))
+    .sort((a, b) => a.name.localeCompare(b.name, 'da-DK'));
+
+  const sections: Array<{ key: 'primary' | 'subscribed'; items: CalendarSource[] }> = [
+    { key: 'primary', items: primary }
+  ];
+  if (subscribed.length > 0) {
+    sections.push({ key: 'subscribed', items: subscribed });
+  }
+  return sections;
+});
 
 const sharedContactSuggestions = computed(() => {
   if (!showSharedSuggestions.value) return [];
@@ -388,6 +402,29 @@ function removeSingleClipboardEvent(evId: string) {
           </div>
         </div>
 
+        <!-- Diskret valg af aktiv kalender til nye aftaler & indsæt -->
+        <div
+          v-if="!store.isPublicShareMode && store.writableCalendars.length > 1"
+          class="mb-2 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-950/60 border border-slate-800/80"
+          title="Mål-kalender når du opretter ny aftale eller bruger Ctrl+V"
+        >
+          <span class="text-[10.5px] text-slate-400 shrink-0">Skriv i:</span>
+          <select
+            v-model="store.activeTargetCalendarId"
+            aria-label="Aktiv kalender til nye aftaler"
+            class="flex-1 min-w-0 bg-transparent text-[11px] font-medium text-slate-200 focus:outline-none cursor-pointer truncate"
+          >
+            <option
+              v-for="wCal in store.writableCalendars"
+              :key="wCal.id"
+              :value="wCal.id"
+              class="bg-slate-900 text-slate-100"
+            >
+              {{ wCal.isShared && wCal.owner ? `${wCal.name} (${wCal.owner})` : wCal.name }}
+            </option>
+          </select>
+        </div>
+
         <div
           v-if="showNewCalendarForm && !store.isPublicShareMode"
           class="mb-2.5 p-2.5 rounded-xl bg-slate-950 border border-blue-500/40 space-y-2"
@@ -655,9 +692,22 @@ function removeSingleClipboardEvent(evId: string) {
         </div>
 
         <div class="space-y-1.5">
-          <div
-            v-for="cal in sortedCalendars"
-            :key="cal.id"
+          <template v-for="section in calendarSections" :key="section.key">
+            <div
+              v-if="section.key === 'subscribed'"
+              class="pt-2.5 mt-2.5 border-t border-slate-800/80 flex items-center justify-between px-0.5"
+            >
+              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Abonnementer
+              </span>
+              <span class="text-[10px] text-slate-500">
+                {{ section.items.length }}
+              </span>
+            </div>
+
+            <div
+              v-for="cal in section.items"
+              :key="cal.id"
             class="group p-2 rounded-xl border transition space-y-1.5"
             :class="cal.visible
               ? 'bg-slate-800/60 border-slate-700/70'
@@ -887,7 +937,7 @@ function removeSingleClipboardEvent(evId: string) {
 
           <!-- Automatisk Fødselsdags- & Mærkedagskalender fra Brogaard Kontakter (CardDAV) -->
           <div
-            v-if="!store.isPublicShareMode && contactsStore.contactsWithSpecialDatesCount > 0 && !store.syncedBirthdayCalendar"
+            v-if="section.key === 'primary' && !store.isPublicShareMode && contactsStore.contactsWithSpecialDatesCount > 0 && !store.syncedBirthdayCalendar"
             class="p-2 rounded-xl border transition space-y-2"
             :class="store.showContactBirthdays
               ? 'bg-slate-800/60 border-slate-700/70'
@@ -963,6 +1013,7 @@ function removeSingleClipboardEvent(evId: string) {
               </span>
             </button>
           </div>
+          </template>
         </div>
 
         <button
@@ -997,24 +1048,6 @@ function removeSingleClipboardEvent(evId: string) {
         <p class="text-[11px] text-slate-300 leading-relaxed">
           Du ser en offentligt delt kalender. Klik på en aftale for at se detaljer.
         </p>
-      </div>
-
-      <div v-else-if="store.writableCalendars.length > 1">
-        <label class="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-          Mål-kalender (Ny / Indsæt)
-        </label>
-        <select
-          v-model="store.activeTargetCalendarId"
-          class="w-full text-xs bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-blue-500"
-        >
-          <option
-            v-for="wCal in store.writableCalendars"
-            :key="wCal.id"
-            :value="wCal.id"
-          >
-            {{ wCal.isShared && wCal.owner ? `${wCal.name} (Delt af ${wCal.owner})` : wCal.name }}
-          </option>
-        </select>
       </div>
     </div>
 
