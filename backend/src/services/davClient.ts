@@ -23,6 +23,7 @@ export interface CalendarInfoDTO {
   localNameOverride?: string | null;
   color: string;
   serverColor: string;
+  localColorOverride?: string | null;
   readOnly: boolean;
   isShared: boolean;
   sharePermission?: 'read' | 'write';
@@ -1842,7 +1843,9 @@ export async function updateCalDavCalendarColor(
   calendarUrl: string,
   color: string
 ): Promise<void> {
-  const safeColor = /^#[0-9a-fA-F]{6}$/.test(color.trim()) ? color.trim().toLowerCase() : FALLBACK_COLORS[0];
+  const safeColor = /^#[0-9a-fA-F]{6}$/.test(color.trim())
+    ? color.trim().toLowerCase()
+    : FALLBACK_COLORS[0];
   const targetUrl = ensureTrailingSlash(calendarUrl.trim());
   assertSameServerOrigin(targetUrl, creds);
 
@@ -1852,13 +1855,27 @@ export async function updateCalDavCalendarColor(
   } catch {
     decoded = targetUrl;
   }
-  const sogoOwnerMatch = decoded.match(/\/SOGo\/dav\/([^/]+)\//i);
-  if (sogoOwnerMatch && sogoOwnerMatch[1]) {
-    const urlOwner = sogoOwnerMatch[1].toLowerCase().trim();
+
+  const candidateUrls: string[] = [];
+  const sogoCalMatch = decoded.match(/\/SOGo\/dav\/([^/]+)\/Calendar\/([^/]+)\/?$/i);
+  if (sogoCalMatch && sogoCalMatch[1] && sogoCalMatch[2]) {
+    const urlOwner = sogoCalMatch[1].toLowerCase().trim();
+    const slug = sogoCalMatch[2].trim();
     const userLower = creds.username.toLowerCase().trim();
-    if (urlOwner !== userLower && urlOwner !== userLower.split('@')[0]) {
-      throw new Error('Du kan kun ændre farve på dine egne kalendere på serveren.');
+
+    if (urlOwner === userLower || urlOwner === userLower.split('@')[0]) {
+      candidateUrls.push(targetUrl);
+    } else {
+      const home = ensureTrailingSlash(buildSogoUserCalendarHomeUrl(creds.serverUrl, creds.username));
+      const sanitizedOwner = urlOwner.replace(/[^a-z0-9]/gi, '_');
+      const localOwner = urlOwner.split('@')[0].replace(/[^a-z0-9]/gi, '_');
+      candidateUrls.push(`${home}${sanitizedOwner}_${slug}/`);
+      if (localOwner && localOwner !== sanitizedOwner) {
+        candidateUrls.push(`${home}${localOwner}_${slug}/`);
+      }
     }
+  } else {
+    candidateUrls.push(targetUrl);
   }
 
   const body = `<?xml version="1.0" encoding="utf-8"?>
@@ -1870,9 +1887,27 @@ export async function updateCalDavCalendarColor(
   </D:set>
 </D:propertyupdate>`;
 
-  await davRequest(creds, 'PROPPATCH', targetUrl, body, {
-    'Content-Type': 'application/xml; charset=utf-8'
-  });
+  let lastErr: unknown = null;
+  for (const url of candidateUrls) {
+    try {
+      const res = await davRequest(creds, 'PROPPATCH', url, body, {
+        'Content-Type': 'application/xml; charset=utf-8'
+      });
+      if (res.status === 207) {
+        const xml = await readResponseTextSmart(res);
+        if (/<(?:[a-zA-Z0-9_-]+:)?propstat\b/i.test(xml) && !extractOkPropstatXml(xml).trim()) {
+          throw new Error('CalDAV-serveren afviste ændring af kalenderfarven.');
+        }
+      }
+      return;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error('Kunne ikke opdatere kalenderfarven på serveren.');
 }
 
 /**

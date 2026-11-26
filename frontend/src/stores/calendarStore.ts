@@ -23,6 +23,7 @@ import {
   apiSearchSharedCalendars,
   apiSubscribeSharedCalendar,
   apiSetCalendarName,
+  apiSetCalendarColor,
   apiFetchPublicShare,
   apiImportIcs,
   apiExportIcs,
@@ -169,6 +170,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   let isFlushing = false;
   let flushRequested = false;
   let userSharesRequestSeq = 0;
+  const colorSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const hiddenCalendarIds = ref<string[]>(loadHiddenCalendarIds());
   const dismissedSharedCount = ref<number>(0);
 
@@ -591,8 +593,13 @@ export const useCalendarStore = defineStore('calendar', () => {
       clearInterval(autoRefreshTimer);
       autoRefreshTimer = null;
     }
+    for (const timer of colorSyncTimers.values()) {
+      clearTimeout(timer);
+    }
+    colorSyncTimers.clear();
     session.value = null;
     localStorage.removeItem(NAME_OVERRIDE_KEY);
+    localStorage.removeItem(COLOR_OVERRIDE_KEY);
     clearClipboard();
     selectedEventIds.value = [];
     clearUndoStack();
@@ -638,15 +645,33 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
   }
 
-  function applyColorOverridesToCalendars(cals: CalendarSource[]) {
-    const overrides = getColorOverrides();
+  function applyColorOverridesToCalendars(
+    cals: CalendarSource[],
+    authoritativeOverrides?: Record<string, string>
+  ) {
+    const overrides =
+      authoritativeOverrides !== undefined ? { ...authoritativeOverrides } : getColorOverrides();
+    if (authoritativeOverrides !== undefined) {
+      saveColorOverrides(overrides);
+    }
     for (const cal of cals) {
-      if (overrides[cal.id]) {
-        cal.localColorOverride = overrides[cal.id];
-        cal.color = overrides[cal.id];
+      const baseColor = cal.serverColor || cal.color;
+      cal.serverColor = baseColor;
+      const override =
+        (authoritativeOverrides !== undefined && cal.localColorOverride
+          ? cal.localColorOverride
+          : null) ||
+        overrides[cal.id] ||
+        overrides[cal.url] ||
+        overrides[cal.id.toLowerCase()] ||
+        overrides[cal.url.toLowerCase()] ||
+        null;
+      if (override && /^#[0-9a-f]{6}$/i.test(override.trim())) {
+        cal.localColorOverride = override.trim().toLowerCase();
+        cal.color = cal.localColorOverride;
       } else {
         cal.localColorOverride = null;
-        cal.color = cal.serverColor || cal.color;
+        cal.color = baseColor;
       }
     }
   }
@@ -726,7 +751,7 @@ export const useCalendarStore = defineStore('calendar', () => {
           })),
         ...localSubCalendars
       ]);
-      applyColorOverridesToCalendars(mergedCalendars);
+      applyColorOverridesToCalendars(mergedCalendars, res.colorOverrides || {});
       applyNameOverridesToCalendars(mergedCalendars, res.nameOverrides || {});
       dismissedSharedCount.value = Number(res.dismissedSharedCount || 0);
       const localSubCalIds = new Set(localSubCalendars.map((c) => c.id));
@@ -1310,22 +1335,88 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
     const cal = getCalendarById(calId);
     if (!cal) return;
+
+    const clean =
+      typeof newColor === 'string' && /^#[0-9a-f]{6}$/i.test(newColor.trim())
+        ? newColor.trim().toLowerCase()
+        : null;
+
     const overrides = getColorOverrides();
-    if (newColor) {
-      overrides[calId] = newColor;
-      cal.localColorOverride = newColor;
-      cal.color = newColor;
+    if (clean) {
+      overrides[calId] = clean;
+      cal.localColorOverride = clean;
+      cal.color = clean;
     } else {
       delete overrides[calId];
       cal.localColorOverride = null;
       cal.color = cal.serverColor;
     }
     saveColorOverrides(overrides);
-    if (cal.isContactBirthdays) {
-      await contactsStore.setContactCalendarColor(newColor);
-    }
+
     if (!isPublicShareMode.value) {
-      await db.calendars.put(clonePlain(cal));
+      await db.calendars.put(clonePlain(cal)).catch(() => {});
+    }
+
+    const existingTimer = colorSyncTimers.get(calId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      colorSyncTimers.delete(calId);
+    }
+
+    if (isPublicShareMode.value || !isOnline.value || session.value?.mode !== 'CALDAV') {
+      return;
+    }
+
+    const pushColorToServer = async () => {
+      try {
+        const res = await apiSetCalendarColor({
+          calendarId: cal.id,
+          calendarUrl: cal.url,
+          color: clean
+        });
+        const target = getCalendarById(calId);
+        if (!target) return;
+
+        const nextOverrides = getColorOverrides();
+        if (clean && res.syncedToServer) {
+          target.serverColor = clean;
+          target.color = clean;
+          target.localColorOverride = null;
+          delete nextOverrides[calId];
+          delete nextOverrides[target.url];
+          if (target.isContactBirthdays) {
+            await contactsStore.setContactCalendarColor(clean);
+          }
+        } else if (clean) {
+          const eff = res.localColorOverride || clean;
+          target.localColorOverride = eff;
+          target.color = eff;
+          nextOverrides[calId] = eff;
+        } else {
+          target.localColorOverride = null;
+          target.color = target.serverColor;
+          delete nextOverrides[calId];
+          delete nextOverrides[target.url];
+        }
+        saveColorOverrides(nextOverrides);
+        await db.calendars.put(clonePlain(target)).catch(() => {});
+      } catch (err: any) {
+        notify(
+          'Kunne ikke synke farve til server',
+          err?.message || 'Farven blev gemt lokalt.',
+          'warning'
+        );
+      }
+    };
+
+    if (clean === null) {
+      await pushColorToServer();
+    } else {
+      const timer = setTimeout(() => {
+        colorSyncTimers.delete(calId);
+        void pushColorToServer();
+      }, 350);
+      colorSyncTimers.set(calId, timer);
     }
   }
 

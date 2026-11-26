@@ -13,6 +13,7 @@ export interface SyncResponse {
   calendars: Omit<CalendarSource, 'visible'>[];
   events: CalendarEvent[];
   nameOverrides?: Record<string, string>;
+  colorOverrides?: Record<string, string>;
   dismissedSharedCount?: number;
   birthdayCalendarSync?: {
     enabled: boolean;
@@ -361,6 +362,34 @@ export async function apiSetCalendarName(params: {
     renamedOnServer: Boolean(data.renamedOnServer),
     effectiveName: data.effectiveName ?? null,
     localNameOverride: data.localNameOverride ?? null,
+    fallbackReason: data.fallbackReason
+  };
+}
+
+export async function apiSetCalendarColor(params: {
+  calendarId: string;
+  calendarUrl?: string;
+  color: string | null;
+}): Promise<{
+  syncedToServer: boolean;
+  effectiveColor: string | null;
+  localColorOverride: string | null;
+  fallbackReason?: string;
+}> {
+  const res = await fetch('/api/caldav/calendar-color', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(params)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke opdatere kalenderfarven.');
+  }
+  return {
+    syncedToServer: Boolean(data.syncedToServer),
+    effectiveColor: data.effectiveColor ?? null,
+    localColorOverride: data.localColorOverride ?? null,
     fallbackReason: data.fallbackReason
   };
 }

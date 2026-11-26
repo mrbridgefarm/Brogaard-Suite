@@ -809,7 +809,7 @@ function removeSingleClipboardEvent(evId: string) {
                 <label
                   class="w-4 h-4 rounded-full border border-white/20 cursor-pointer flex items-center justify-center overflow-hidden shadow-inner ml-0.5"
                   :style="{ backgroundColor: cal.color }"
-                  title="Klik for at overskrive kalenderfarven lokalt"
+                  title="Klik for at ændre kalenderfarve (synkroniseres med Mailcow/SOGo)"
                 >
                   <input
                     type="color"

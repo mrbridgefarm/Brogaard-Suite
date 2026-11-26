@@ -447,6 +447,22 @@ export function removeUserSubscription(creds: CalDavCredentials, subscriptionId:
   return true;
 }
 
+export function updateUserSubscriptionColor(
+  creds: CalDavCredentials,
+  subscriptionId: string,
+  color: string
+): boolean {
+  const safeColor = /^#[0-9a-f]{6}$/i.test(color.trim()) ? color.trim().toLowerCase() : '';
+  if (!safeColor) return false;
+  const userKey = getUserKey(creds);
+  const all = readAllSubscriptions();
+  const target = all.find((item) => item.userKey === userKey && item.id === subscriptionId);
+  if (!target) return false;
+  target.color = safeColor;
+  writeAllSubscriptions(all);
+  return true;
+}
+
 export interface ClientSubscriptionHint {
   id?: string;
   name?: string;

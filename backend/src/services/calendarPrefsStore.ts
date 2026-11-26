@@ -5,6 +5,7 @@ import { ensureTrailingSlash, canonicalSogoCalendarSignature } from './davClient
 
 export interface UserCalendarPrefs {
   nameOverrides: Record<string, string>;
+  colorOverrides: Record<string, string>;
   dismissedSharedCalendars: string[];
 }
 
@@ -21,6 +22,14 @@ function normalizePrefsEntry(raw: any): UserCalendarPrefs {
       }
     }
   }
+  const colorOverrides: Record<string, string> = {};
+  if (raw && typeof raw.colorOverrides === 'object' && raw.colorOverrides !== null) {
+    for (const [k, v] of Object.entries(raw.colorOverrides)) {
+      if (typeof k === 'string' && typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v.trim())) {
+        colorOverrides[k] = v.trim().toLowerCase();
+      }
+    }
+  }
   const dismissedSharedCalendars: string[] = Array.isArray(raw?.dismissedSharedCalendars)
     ? Array.from(
         new Set(
@@ -30,7 +39,7 @@ function normalizePrefsEntry(raw: any): UserCalendarPrefs {
         )
       )
     : [];
-  return { nameOverrides, dismissedSharedCalendars };
+  return { nameOverrides, colorOverrides, dismissedSharedCalendars };
 }
 
 function cloneAllPrefs(data: AllCalendarPrefs): AllCalendarPrefs {
@@ -38,6 +47,7 @@ function cloneAllPrefs(data: AllCalendarPrefs): AllCalendarPrefs {
   for (const [userKey, entry] of Object.entries(data)) {
     copy[userKey] = {
       nameOverrides: { ...entry.nameOverrides },
+      colorOverrides: { ...entry.colorOverrides },
       dismissedSharedCalendars: [...entry.dismissedSharedCalendars]
     };
   }
@@ -86,7 +96,7 @@ function writeAllPrefs(data: AllCalendarPrefs): void {
 function getOrCreateUserPrefs(all: AllCalendarPrefs, username: string): { userKey: string; prefs: UserCalendarPrefs } {
   const userKey = username.toLowerCase().trim();
   if (!all[userKey]) {
-    all[userKey] = { nameOverrides: {}, dismissedSharedCalendars: [] };
+    all[userKey] = { nameOverrides: {}, colorOverrides: {}, dismissedSharedCalendars: [] };
   }
   return { userKey, prefs: all[userKey] };
 }
@@ -192,6 +202,71 @@ export function setCalendarNameOverride(
 
   writeAllPrefs(all);
   return { ...prefs.nameOverrides };
+}
+
+export function getCalendarColorOverrides(username: string): Record<string, string> {
+  const userKey = username.toLowerCase().trim();
+  if (!userKey) return {};
+  const all = readAllPrefs();
+  return all[userKey] ? { ...all[userKey].colorOverrides } : {};
+}
+
+export function resolveCalendarColorOverride(
+  overrides: Record<string, string>,
+  calendarId: string,
+  calendarUrl?: string
+): string | undefined {
+  if (!overrides) return undefined;
+  for (const cand of buildCalendarPrefCandidates(calendarId, calendarUrl)) {
+    if (overrides[cand]) return overrides[cand];
+  }
+  return undefined;
+}
+
+export function setCalendarColorOverride(
+  username: string,
+  calendarIdOrUrl: string,
+  color: string | null,
+  secondaryIdOrUrl?: string
+): Record<string, string> {
+  const userKey = username.toLowerCase().trim();
+  if (!userKey) return {};
+  const primaryKey = canonicalCalendarPrefKey(calendarIdOrUrl);
+  if (!primaryKey) return getCalendarColorOverrides(username);
+
+  const secondaryKey = secondaryIdOrUrl ? canonicalCalendarPrefKey(secondaryIdOrUrl) : '';
+  const primarySig = canonicalSogoCalendarSignature(calendarIdOrUrl) || '';
+  const secondarySig = secondaryIdOrUrl ? canonicalSogoCalendarSignature(secondaryIdOrUrl) || '' : '';
+  const rawPrimary = calendarIdOrUrl.trim();
+  const rawSecondary = secondaryIdOrUrl ? secondaryIdOrUrl.trim() : '';
+  const clean =
+    typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color.trim())
+      ? color.trim().toLowerCase()
+      : '';
+
+  const all = readAllPrefs();
+  const { prefs } = getOrCreateUserPrefs(all, userKey);
+
+  if (!clean) {
+    delete prefs.colorOverrides[primaryKey];
+    if (primarySig) delete prefs.colorOverrides[primarySig];
+    if (rawPrimary && rawPrimary !== primaryKey) delete prefs.colorOverrides[rawPrimary];
+    if (secondaryKey) delete prefs.colorOverrides[secondaryKey];
+    if (secondarySig) delete prefs.colorOverrides[secondarySig];
+    if (rawSecondary && rawSecondary !== secondaryKey) delete prefs.colorOverrides[rawSecondary];
+  } else {
+    prefs.colorOverrides[primaryKey] = clean;
+    if (primarySig && primarySig !== primaryKey) delete prefs.colorOverrides[primarySig];
+    if (rawPrimary && rawPrimary !== primaryKey) delete prefs.colorOverrides[rawPrimary];
+    if (secondaryKey && secondaryKey !== primaryKey) delete prefs.colorOverrides[secondaryKey];
+    if (secondarySig && secondarySig !== primaryKey) delete prefs.colorOverrides[secondarySig];
+    if (rawSecondary && rawSecondary !== primaryKey && rawSecondary !== secondaryKey) {
+      delete prefs.colorOverrides[rawSecondary];
+    }
+  }
+
+  writeAllPrefs(all);
+  return { ...prefs.colorOverrides };
 }
 
 export function getDismissedSharedCalendars(username: string): string[] {

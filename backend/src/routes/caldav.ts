@@ -19,7 +19,8 @@ import {
   ensureTrailingSlash,
   createCalDavCalendar,
   deleteCalDavCalendar,
-  renameCalDavCalendar
+  renameCalDavCalendar,
+  updateCalDavCalendarColor
 } from '../services/davClient.js';
 import {
   type CalendarEventDTO,
@@ -66,6 +67,9 @@ import {
   getCalendarNameOverrides,
   resolveCalendarNameOverride,
   setCalendarNameOverride,
+  getCalendarColorOverrides,
+  resolveCalendarColorOverride,
+  setCalendarColorOverride,
   isSharedCalendarDismissed,
   addDismissedSharedCalendar,
   removeDismissedSharedCalendar,
@@ -78,7 +82,8 @@ import {
 } from '../services/aliasStore.js';
 import {
   getUserContactPrefs,
-  setUserBirthdayCalendarSync
+  setUserBirthdayCalendarSync,
+  setUserContactCalendarColor
 } from '../services/contactPrefsStore.js';
 import {
   isBrogaardBirthdayCalendarUrl,
@@ -89,6 +94,7 @@ import {
 import {
   addUserSubscription,
   removeUserSubscription,
+  updateUserSubscriptionColor,
   syncUserSubscriptions
 } from '../services/subscriptionService.js';
 import {
@@ -395,6 +401,8 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
     const allCalendars = [...mergedCalendars, ...subData.calendars];
     const savedNameOverrides = getCalendarNameOverrides(creds.username);
     const clientNameOverrides: Record<string, string> = { ...savedNameOverrides };
+    const savedColorOverrides = getCalendarColorOverrides(creds.username);
+    const clientColorOverrides: Record<string, string> = { ...savedColorOverrides };
 
     for (const cal of allCalendars) {
       const origName = cal.serverName || cal.name;
@@ -407,6 +415,15 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
       } else {
         cal.localNameOverride = null;
       }
+
+      const colorAlias = resolveCalendarColorOverride(savedColorOverrides, cal.id, cal.url);
+      if (colorAlias) {
+        cal.color = colorAlias;
+        cal.localColorOverride = colorAlias;
+        clientColorOverrides[cal.id] = colorAlias;
+      } else {
+        cal.localColorOverride = null;
+      }
     }
 
     sendCompressedJson(req, res, {
@@ -414,6 +431,7 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
       calendars: allCalendars,
       events: [...mergedEvents, ...subData.events],
       nameOverrides: clientNameOverrides,
+      colorOverrides: clientColorOverrides,
       dismissedSharedCount,
       birthdayCalendarSync: {
         enabled: Boolean(contactPrefs.birthdayCalendarSyncEnabled),
@@ -1563,6 +1581,100 @@ caldavRouter.put('/calendar-name', async (req: Request, res: Response) => {
     res.status(400).json({
       ok: false,
       error: err?.message || 'Kunne ikke gemme kalendernavn.'
+    });
+  }
+});
+
+/**
+ * PUT /api/caldav/calendar-color
+ * Opdaterer kalenderfarven direkte på Mailcow/SOGo via CalDAV PROPPATCH (eller gemmer brugerens personlige farve).
+ */
+caldavRouter.put('/calendar-color', async (req: Request, res: Response) => {
+  try {
+    const creds = requireDavCredentials(req);
+    const calendarId = String(req.body?.calendarId || '').trim();
+    const calendarUrl = String(req.body?.calendarUrl || '').trim();
+    const rawColor = req.body?.color;
+
+    const primaryKey = calendarUrl || calendarId;
+    if (!primaryKey) {
+      res.status(400).json({ ok: false, error: 'calendarId eller calendarUrl mangler.' });
+      return;
+    }
+
+    if (rawColor === null || rawColor === undefined || String(rawColor).trim() === '') {
+      setCalendarColorOverride(creds.username, primaryKey, null, calendarId || undefined);
+      res.json({
+        ok: true,
+        syncedToServer: false,
+        effectiveColor: null,
+        localColorOverride: null
+      });
+      return;
+    }
+
+    const cleanColor = String(rawColor).trim().toLowerCase();
+    if (!/^#[0-9a-f]{6}$/i.test(cleanColor)) {
+      res.status(400).json({ ok: false, error: 'Ugyldig hex-farve.' });
+      return;
+    }
+
+    if (calendarId.startsWith('sub::')) {
+      const updatedSub = updateUserSubscriptionColor(creds, calendarId, cleanColor);
+      setCalendarColorOverride(
+        creds.username,
+        primaryKey,
+        updatedSub ? null : cleanColor,
+        calendarId || undefined
+      );
+      res.json({
+        ok: true,
+        syncedToServer: updatedSub,
+        effectiveColor: cleanColor,
+        localColorOverride: updatedSub ? null : cleanColor
+      });
+      return;
+    }
+
+    if (calendarUrl) {
+      try {
+        await updateCalDavCalendarColor(creds, calendarUrl, cleanColor);
+        setCalendarColorOverride(creds.username, primaryKey, null, calendarId || undefined);
+        const contactPrefs = getUserContactPrefs(creds.username);
+        if (isBrogaardBirthdayCalendarUrl(calendarUrl, contactPrefs.birthdayCalendarUrl)) {
+          setUserContactCalendarColor(creds.username, cleanColor);
+        }
+        res.json({
+          ok: true,
+          syncedToServer: true,
+          effectiveColor: cleanColor,
+          localColorOverride: null
+        });
+        return;
+      } catch (colorErr: any) {
+        setCalendarColorOverride(creds.username, primaryKey, cleanColor, calendarId || undefined);
+        res.json({
+          ok: true,
+          syncedToServer: false,
+          effectiveColor: cleanColor,
+          localColorOverride: cleanColor,
+          fallbackReason: colorErr?.message || 'Serveren understøttede ikke direkte farveændring.'
+        });
+        return;
+      }
+    }
+
+    setCalendarColorOverride(creds.username, primaryKey, cleanColor, calendarId || undefined);
+    res.json({
+      ok: true,
+      syncedToServer: false,
+      effectiveColor: cleanColor,
+      localColorOverride: cleanColor
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke gemme kalenderfarve.'
     });
   }
 });
