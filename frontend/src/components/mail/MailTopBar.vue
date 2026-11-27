@@ -23,6 +23,7 @@ import {
 } from 'lucide-vue-next';
 import { useMailStore, type AutoRefreshMinutes } from '../../stores/mailStore';
 import { useTheme } from '../../composables/useTheme';
+import { useViewport } from '../../composables/useViewport';
 import ThemePicker from '../shared/ThemePicker.vue';
 import SuiteModuleSwitcher from '../shared/SuiteModuleSwitcher.vue';
 import SuiteTopActions from '../shared/SuiteTopActions.vue';
@@ -38,6 +39,7 @@ const emit = defineEmits<{
 
 const store = useMailStore();
 const { currentTheme } = useTheme();
+const { isMobile } = useViewport();
 const isSearchFocused = ref(false);
 const isHelpOpen = ref(false);
 const isSyncMenuOpen = ref(false);
@@ -231,8 +233,9 @@ function toggleLayout() {
     <!-- Højre: Layout-skifter, Sieve-Filtre, Aliaser, Undo, Tema, Hjælp, Sync, Ny e-mail & Konto -->
     <div class="flex items-center gap-1.5 shrink-0">
       <button
+        v-if="!isMobile"
         type="button"
-        class="hidden md:inline-flex p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
+        class="inline-flex p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
         :title="store.layoutMode === 'THREE_COL' ? 'Visning: 3-kolonne Widescreen (Klik for Split-visning)' : 'Visning: Klassisk Split (Klik for 3-kolonne)'"
         @click="toggleLayout"
       >
@@ -241,8 +244,9 @@ function toggleLayout() {
       </button>
 
       <button
+        v-if="!isMobile"
         type="button"
-        class="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
         title="Sieve Mail-Filtre & Regler (Mailcow / SOGo port 4190)"
         @click="store.openSieveModal()"
       >
@@ -251,8 +255,9 @@ function toggleLayout() {
       </button>
 
       <button
+        v-if="!isMobile"
         type="button"
-        class="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
         title="Administrér dine afsender-aliaser og signaturer"
         @click="store.isAliasModalOpen = true"
       >
@@ -264,9 +269,10 @@ function toggleLayout() {
       </button>
 
       <button
+        v-if="!isMobile"
         type="button"
         :disabled="store.undoStack.length === 0"
-        class="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
         title="Fortryd seneste handling (Ctrl+Z)"
         @click="store.triggerUndo()"
       >
@@ -282,7 +288,7 @@ function toggleLayout() {
 
       <ThemePicker variant="topbar" />
 
-      <div class="relative hidden md:block">
+      <div v-if="!isMobile" class="relative">
         <button
           type="button"
           class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
@@ -347,8 +353,8 @@ function toggleLayout() {
           @click="isSyncMenuOpen = !isSyncMenuOpen"
         >
           <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin text-blue-400': store.isSyncing }" />
-          <Wifi v-if="store.isOnline" class="w-3.5 h-3.5 text-emerald-400 hidden sm:block" />
-          <WifiOff v-else class="w-3.5 h-3.5 text-amber-400" />
+          <Wifi v-if="store.isOnline && !isMobile" class="w-3.5 h-3.5 text-emerald-400" />
+          <WifiOff v-else-if="!store.isOnline" class="w-3.5 h-3.5 text-amber-400" />
           <span
             v-if="store.autoRefreshMinutes > 0"
             class="px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-semibold"

@@ -4,11 +4,13 @@ import { useSuiteStore } from '../../stores/suiteStore';
 import { useMailStore } from '../../stores/mailStore';
 import { useContactsStore } from '../../stores/contactsStore';
 import { useTheme } from '../../composables/useTheme';
+import { useViewport } from '../../composables/useViewport';
 
 const suiteStore = useSuiteStore();
 const mailStore = useMailStore();
 const contactsStore = useContactsStore();
 const { currentTheme } = useTheme();
+const { isMobile } = useViewport();
 </script>
 
 <template>
@@ -25,10 +27,11 @@ const { currentTheme } = useTheme();
       ></span>
     </div>
 
-    <!-- Segmenteret Modulskifter: Mail / Kalender / Kontakter (skjules på mobil hvor bundmenuen bruges) -->
+    <!-- Segmenteret Modulskifter: Mail / Kalender / Kontakter (skjules på mobil/tablet hvor bundmenuen bruges) -->
     <nav
+      v-if="!isMobile"
       aria-label="Brogaard Suite Moduler"
-      class="hidden md:flex items-center p-0.5 rounded-xl border text-xs transition shrink-0"
+      class="flex items-center p-0.5 rounded-xl border text-xs transition shrink-0"
       :class="currentTheme.wallpaper ? 'bg-black/30 border-white/15' : 'bg-slate-950 border-slate-800'"
     >
       <button

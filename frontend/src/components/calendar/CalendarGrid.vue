@@ -15,6 +15,7 @@ import type { DateClickArg, EventResizeDoneArg } from '@fullcalendar/interaction
 import { Check, Copy, Scissors } from 'lucide-vue-next';
 import { useCalendarStore, toDateOnlyString } from '../../stores/calendarStore';
 import { useTheme } from '../../composables/useTheme';
+import { useViewport } from '../../composables/useViewport';
 import type { CalendarEvent, CalendarViewType } from '../../types/calendar';
 import YearView from './YearView.vue';
 
@@ -51,6 +52,7 @@ function createSvgIcon(paths: string[]): SVGSVGElement {
 }
 
 const { currentTheme } = useTheme();
+const { isMobile } = useViewport();
 const ICON_VIDEO_TPL = createSvgIcon(['m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5', 'M2 6h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z']);
 const ICON_USERS_TPL = createSvgIcon(['M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2', 'M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', 'M22 21v-2a4 4 0 0 0-3-3.87', 'M16 3.13a4 4 0 0 1 0 7.75']);
 const ICON_LOCK_TPL = createSvgIcon(['M7 11V7a5 5 0 0 1 10 0v4', 'M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z']);
@@ -538,7 +540,7 @@ defineExpose({
     @contextmenu="handleGridContextMenu"
   >
     <!-- Valgt mål-dato & markering i toppen af gitteret (kun desktop) -->
-    <div v-if="!store.isPublicShareMode" class="hidden md:flex mb-2 items-center justify-between text-xs px-1 text-slate-400">
+    <div v-if="!store.isPublicShareMode && !isMobile" class="flex mb-2 items-center justify-between text-xs px-1 text-slate-400">
       <div class="flex items-center gap-3 flex-wrap">
         <span>
           Aktiv mål-dato (<kbd class="px-1 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl+V</kbd>):
@@ -579,7 +581,7 @@ defineExpose({
 
     <div
       :class="[
-        store.isPublicShareMode ? 'h-full' : 'h-full md:h-[calc(100%-28px)]',
+        store.isPublicShareMode || isMobile ? 'h-full' : 'h-[calc(100%-28px)]',
         currentTheme.wallpaper
           ? 'rounded-2xl overflow-hidden border backdrop-blur-lg shadow-xl'
           : 'rounded-2xl overflow-hidden border border-slate-800 bg-slate-900/50 shadow-inner'

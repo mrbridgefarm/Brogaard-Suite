@@ -449,7 +449,7 @@ html[data-theme="deep-space-3d"] .dav-login-card {
   padding-top: env(safe-area-inset-top, 0px);
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .fc .fc-col-header-cell {
     padding: 4px 0;
     font-size: 0.65rem;

@@ -9,6 +9,7 @@ const PWA_BANNER_DISMISSED_KEY = 'brogaard_pwa_hint_dismissed_v1';
 
 const isMobile = ref(false);
 const isTablet = ref(false);
+const isMobileBrowser = ref(false);
 const isTouchDevice = ref(false);
 const isStandalonePwa = ref(false);
 const deferredInstallPrompt = ref<BeforeInstallPromptEvent | null>(null);
@@ -29,28 +30,61 @@ function readStandalonePwa(): boolean {
   );
 }
 
+function detectMobileOrTabletBrowser(): boolean {
+  if (typeof window === 'undefined') return false;
+  const nav = window.navigator as Navigator & {
+    userAgentData?: { mobile?: boolean };
+  };
+  if (nav.userAgentData?.mobile === true) return true;
+
+  const ua = nav.userAgent || '';
+  if (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet|Silk|Kindle|PlayBook/i.test(
+      ua
+    )
+  ) {
+    return true;
+  }
+
+  // iPadOS Safari i desktop-visning rapporterer "MacIntel" med touch-punkter
+  if ((nav.platform || '') === 'MacIntel' && (nav.maxTouchPoints || 0) > 1) {
+    return true;
+  }
+
+  // Enheder uden mus/hover-peger (ren touch-telefon eller tablet)
+  if (window.matchMedia('(pointer: coarse) and (hover: none)').matches) {
+    return true;
+  }
+
+  return false;
+}
+
 function initViewportListeners() {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
 
-  const mobileMq = window.matchMedia('(max-width: 767px)');
-  const tabletMq = window.matchMedia('(min-width: 768px) and (max-width: 1023px)');
+  const narrowMq = window.matchMedia('(max-width: 1023px)');
+  const tabletWidthMq = window.matchMedia('(min-width: 768px)');
   const touchMq = window.matchMedia('(pointer: coarse)');
+  const coarseNoHoverMq = window.matchMedia('(pointer: coarse) and (hover: none)');
   const standaloneMq = window.matchMedia('(display-mode: standalone)');
   const fullscreenMq = window.matchMedia('(display-mode: fullscreen)');
 
   const update = () => {
-    isMobile.value = mobileMq.matches;
-    isTablet.value = tabletMq.matches;
+    const browserIsMobileOrTablet = detectMobileOrTabletBrowser();
+    isMobileBrowser.value = browserIsMobileOrTablet;
+    isMobile.value = narrowMq.matches || browserIsMobileOrTablet;
+    isTablet.value = isMobile.value && tabletWidthMq.matches;
     isTouchDevice.value = touchMq.matches || (window.navigator?.maxTouchPoints || 0) > 0;
     isStandalonePwa.value = readStandalonePwa();
   };
 
   update();
 
-  mobileMq.addEventListener('change', update);
-  tabletMq.addEventListener('change', update);
+  narrowMq.addEventListener('change', update);
+  tabletWidthMq.addEventListener('change', update);
   touchMq.addEventListener('change', update);
+  coarseNoHoverMq.addEventListener('change', update);
   standaloneMq.addEventListener('change', update);
   fullscreenMq.addEventListener('change', update);
 
@@ -91,8 +125,8 @@ const showMobilePwaInstallBanner = computed<boolean>(
 
 const displayModeLabel = computed<string>(() => {
   if (isStandalonePwa.value) return 'PWA App';
-  if (isMobile.value) return 'Mobilbrowser';
   if (isTablet.value) return 'Tablet';
+  if (isMobile.value) return 'Mobilbrowser';
   return 'Desktop';
 });
 
@@ -126,6 +160,7 @@ export function useViewport() {
   return {
     isMobile,
     isTablet,
+    isMobileBrowser,
     isTouchDevice,
     isStandalonePwa,
     isIos,

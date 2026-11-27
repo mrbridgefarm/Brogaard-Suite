@@ -11,6 +11,7 @@ import { useMailStore } from './stores/mailStore';
 import { useCalendarStore } from './stores/calendarStore';
 import { useContactsStore } from './stores/contactsStore';
 import { useTheme } from './composables/useTheme';
+import { useViewport } from './composables/useViewport';
 import {
   X,
   CheckCircle2,
@@ -25,6 +26,7 @@ const mailStore = useMailStore();
 const calendarStore = useCalendarStore();
 const contactsStore = useContactsStore();
 const { currentTheme } = useTheme();
+const { isMobile } = useViewport();
 
 const calendarViewRef = ref<InstanceType<typeof CalendarView> | null>(null);
 
@@ -287,7 +289,10 @@ onUnmounted(() => {
     <ContactModal />
 
     <!-- Samlede Toast Notifikationer -->
-    <div class="fixed bottom-20 md:bottom-4 left-3 right-3 md:left-auto md:right-4 z-50 flex flex-col gap-2 md:max-w-sm md:w-full pointer-events-none">
+    <div
+      class="fixed z-50 flex flex-col gap-2 pointer-events-none"
+      :class="isMobile ? 'bottom-20 left-3 right-3' : 'bottom-4 right-4 max-w-sm w-full'"
+    >
       <div
         v-for="t in suiteStore.toasts"
         :key="t.id"

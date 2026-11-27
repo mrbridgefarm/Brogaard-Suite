@@ -10,6 +10,7 @@ const mailStore = useMailStore();
 const { currentTheme } = useTheme();
 const {
   isMobile,
+  isTablet,
   isStandalonePwa,
   isIos,
   canPromptPwaInstall,
@@ -38,10 +39,10 @@ const {
       <div class="flex items-center gap-2 min-w-0">
         <Smartphone class="w-4 h-4 text-blue-400 shrink-0" />
         <span v-if="canPromptPwaInstall" class="truncate text-[11.5px]">
-          <strong class="text-slate-100">Mobilbrowser:</strong> Installér som app på hjemskærmen
+          <strong class="text-slate-100">{{ displayModeLabel }}:</strong> Installér som app på hjemskærmen
         </span>
         <span v-else-if="isIos" class="text-[11px] leading-snug text-slate-200">
-          <strong>Mobilbrowser:</strong> Tryk på <strong>Del</strong> → <em>Føj til hjemmeskærm</em> for PWA-app
+          <strong>{{ displayModeLabel }}:</strong> Tryk på <strong>Del</strong> → <em>Føj til hjemmeskærm</em> for PWA-app
         </span>
       </div>
 
@@ -148,7 +149,7 @@ const {
           :title="`Kører i: ${displayModeLabel}`"
         >
           <Smartphone class="w-3 h-3 shrink-0" />
-          <span>{{ isStandalonePwa ? 'PWA' : 'Mobil' }}</span>
+          <span>{{ isStandalonePwa ? 'PWA' : isTablet ? 'Tablet' : 'Mobil' }}</span>
         </div>
       </div>
     </nav>

@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { ExternalLink, LogOut } from 'lucide-vue-next';
 import { useSuiteStore } from '../../stores/suiteStore';
+import { useViewport } from '../../composables/useViewport';
 
 const suiteStore = useSuiteStore();
+const { isMobile } = useViewport();
 </script>
 
 <template>
   <div class="flex items-center gap-1.5 shrink-0">
     <a
-      v-if="suiteStore.sogoUrl"
+      v-if="suiteStore.sogoUrl && !isMobile"
       :href="suiteStore.sogoUrl"
       target="_blank"
       rel="noopener noreferrer"
-      class="hidden md:flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-700 bg-slate-800/85 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+      class="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-700 bg-slate-800/85 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
       title="Åbn klassisk SOGo webmail/kalender i ny fane"
     >
       <ExternalLink class="w-3.5 h-3.5 text-sky-400" />
