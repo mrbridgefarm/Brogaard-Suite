@@ -115,14 +115,6 @@ const senderEmailImageCandidates = computed<string[]>(() => {
   return results;
 });
 
-const canOfferPhotoUpdateOnExisting = computed(() =>
-  Boolean(
-    senderExistingContact.value &&
-      !contactsStore.isAddressBookReadOnly(senderExistingContact.value.addressBookId) &&
-      !senderExistingContact.value.photoDataUrl
-  )
-);
-
 const inviteConflicts = computed(() => {
   const invite = msg.value?.calendarInvite;
   if (!invite?.start) return [];
@@ -569,53 +561,15 @@ function downloadIcsInvite() {
             <span class="text-slate-100 font-semibold break-all">
               {{ formatAddressList(msg.from) }}
             </span>
-            <template v-if="primarySender?.address && suiteStore.isAnyModuleEnabled('contacts')">
-              <template v-if="!senderAlreadyInContacts">
-                <button
-                  v-if="senderNameMatchContact"
-                  type="button"
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/45 text-blue-200 text-[10.5px] font-semibold transition"
-                  :title="`Tilføj e-mailen og evt. foto til eksisterende kontakt '${senderNameMatchContact.fullName}'`"
-                  @click="
-                    suiteStore.mergeSenderIntoContact(
-                      senderNameMatchContact,
-                      primarySender.name,
-                      primarySender.address,
-                      senderEmailImageCandidates
-                    )
-                  "
-                >
-                  <UserPlus class="w-3 h-3" />
-                  <span>Flet med {{ senderNameMatchContact.fullName }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-[10.5px] font-semibold transition"
-                  :title="
-                    senderNameMatchContact
-                      ? 'Opret som ny kontakt eller vælg en anden kontakt at flette med'
-                      : 'Gem som ny kontakt eller tilføj til eksisterende kontakt i CardDAV'
-                  "
-                  @click="
-                    suiteStore.saveSenderAsContact(
-                      primarySender.name,
-                      primarySender.address,
-                      senderEmailImageCandidates
-                    )
-                  "
-                >
-                  <UserPlus class="w-3 h-3" />
-                  <span>{{ senderNameMatchContact ? 'Ny / anden kontakt' : 'Gem / Flet i kontakter' }}</span>
-                </button>
-              </template>
+            <template v-if="primarySender?.address && suiteStore.isAnyModuleEnabled('contacts') && !senderAlreadyInContacts">
               <button
-                v-else-if="canOfferPhotoUpdateOnExisting && senderExistingContact"
+                v-if="senderNameMatchContact"
                 type="button"
-                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/35 text-blue-300 text-[10.5px] font-medium transition"
-                title="Kontakten har endnu intet gemt foto i CardDAV — klik for at hente/opdatere foto"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/45 text-blue-200 text-[10.5px] font-semibold transition"
+                :title="`Tilføj e-mailen og evt. foto til eksisterende kontakt '${senderNameMatchContact.fullName}'`"
                 @click="
                   suiteStore.mergeSenderIntoContact(
-                    senderExistingContact,
+                    senderNameMatchContact,
                     primarySender.name,
                     primarySender.address,
                     senderEmailImageCandidates
@@ -623,7 +577,26 @@ function downloadIcsInvite() {
                 "
               >
                 <UserPlus class="w-3 h-3" />
-                <span>Opdatér foto / kontakt</span>
+                <span>Flet med {{ senderNameMatchContact.fullName }}</span>
+              </button>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-[10.5px] font-semibold transition"
+                :title="
+                  senderNameMatchContact
+                    ? 'Opret som ny kontakt eller vælg en anden kontakt at flette med'
+                    : 'Gem som ny kontakt eller tilføj til eksisterende kontakt i CardDAV'
+                "
+                @click="
+                  suiteStore.saveSenderAsContact(
+                    primarySender.name,
+                    primarySender.address,
+                    senderEmailImageCandidates
+                  )
+                "
+              >
+                <UserPlus class="w-3 h-3" />
+                <span>{{ senderNameMatchContact ? 'Ny / anden kontakt' : 'Gem / Flet i kontakter' }}</span>
               </button>
             </template>
           </div>
