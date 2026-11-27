@@ -86,6 +86,43 @@ const senderAlreadyInContacts = computed(() => {
   return contactsStore.hasContactWithEmail(primarySender.value.address);
 });
 
+const senderExistingContact = computed(() => {
+  if (!primarySender.value?.address) return null;
+  return contactsStore.findContactByEmail(primarySender.value.address);
+});
+
+const senderNameMatchContact = computed(() => {
+  if (senderExistingContact.value || !primarySender.value?.name) return null;
+  return contactsStore.findBestWritableNameMatch(primarySender.value.name);
+});
+
+const senderEmailImageCandidates = computed<string[]>(() => {
+  const atts = msg.value?.attachments || [];
+  const results: string[] = [];
+  const seen = new Set<string>();
+  for (const att of atts) {
+    if (!att.contentBase64) continue;
+    if (!/^image\/(jpeg|jpg|png|webp|gif)$/i.test(att.contentType || '')) continue;
+    // Ignorér 1×1 tracking pixels eller kæmpe råfiler
+    if (att.size > 0 && (att.size < 1500 || att.size > 3 * 1024 * 1024)) continue;
+    const mime = (att.contentType || 'image/jpeg').split(';')[0].trim().toLowerCase();
+    const dataUrl = `data:${mime};base64,${att.contentBase64}`;
+    if (seen.has(dataUrl)) continue;
+    seen.add(dataUrl);
+    results.push(dataUrl);
+    if (results.length >= 6) break;
+  }
+  return results;
+});
+
+const canOfferPhotoUpdateOnExisting = computed(() =>
+  Boolean(
+    senderExistingContact.value &&
+      !contactsStore.isAddressBookReadOnly(senderExistingContact.value.addressBookId) &&
+      !senderExistingContact.value.photoDataUrl
+  )
+);
+
 const inviteConflicts = computed(() => {
   const invite = msg.value?.calendarInvite;
   if (!invite?.start) return [];
@@ -532,16 +569,63 @@ function downloadIcsInvite() {
             <span class="text-slate-100 font-semibold break-all">
               {{ formatAddressList(msg.from) }}
             </span>
-            <button
-              v-if="primarySender?.address && suiteStore.isAnyModuleEnabled('contacts') && !senderAlreadyInContacts"
-              type="button"
-              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-[10.5px] font-semibold transition"
-              title="Tilføj denne afsender til Brogaard Kontakter (CardDAV)"
-              @click="suiteStore.saveSenderAsContact(primarySender.name, primarySender.address)"
-            >
-              <UserPlus class="w-3 h-3" />
-              <span>Gem i kontakter</span>
-            </button>
+            <template v-if="primarySender?.address && suiteStore.isAnyModuleEnabled('contacts')">
+              <template v-if="!senderAlreadyInContacts">
+                <button
+                  v-if="senderNameMatchContact"
+                  type="button"
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/45 text-blue-200 text-[10.5px] font-semibold transition"
+                  :title="`Tilføj e-mailen og evt. foto til eksisterende kontakt '${senderNameMatchContact.fullName}'`"
+                  @click="
+                    suiteStore.mergeSenderIntoContact(
+                      senderNameMatchContact,
+                      primarySender.name,
+                      primarySender.address,
+                      senderEmailImageCandidates
+                    )
+                  "
+                >
+                  <UserPlus class="w-3 h-3" />
+                  <span>Flet med {{ senderNameMatchContact.fullName }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-[10.5px] font-semibold transition"
+                  :title="
+                    senderNameMatchContact
+                      ? 'Opret som ny kontakt eller vælg en anden kontakt at flette med'
+                      : 'Gem som ny kontakt eller tilføj til eksisterende kontakt i CardDAV'
+                  "
+                  @click="
+                    suiteStore.saveSenderAsContact(
+                      primarySender.name,
+                      primarySender.address,
+                      senderEmailImageCandidates
+                    )
+                  "
+                >
+                  <UserPlus class="w-3 h-3" />
+                  <span>{{ senderNameMatchContact ? 'Ny / anden kontakt' : 'Gem / Flet i kontakter' }}</span>
+                </button>
+              </template>
+              <button
+                v-else-if="canOfferPhotoUpdateOnExisting && senderExistingContact"
+                type="button"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/35 text-blue-300 text-[10.5px] font-medium transition"
+                title="Kontakten har endnu intet gemt foto i CardDAV — klik for at hente/opdatere foto"
+                @click="
+                  suiteStore.mergeSenderIntoContact(
+                    senderExistingContact,
+                    primarySender.name,
+                    primarySender.address,
+                    senderEmailImageCandidates
+                  )
+                "
+              >
+                <UserPlus class="w-3 h-3" />
+                <span>Opdatér foto / kontakt</span>
+              </button>
+            </template>
           </div>
           <div class="flex items-baseline gap-2">
             <span class="text-slate-500 font-medium w-10 shrink-0">Til:</span>

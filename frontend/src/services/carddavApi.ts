@@ -180,3 +180,20 @@ export async function apiSaveContactCalendarColor(
   }
   return (data.calendarColor as string | null) ?? null;
 }
+
+export async function apiFetchContactPhoto(params: {
+  email?: string;
+  url?: string;
+}): Promise<string | null> {
+  const res = await fetch('/api/carddav/fetch-photo', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(params)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke hente profilbillede.');
+  }
+  return (data.photoDataUrl as string | null) ?? null;
+}

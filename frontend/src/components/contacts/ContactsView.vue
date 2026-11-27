@@ -61,6 +61,7 @@ const listScrollRef = ref<HTMLElement | null>(null);
 const bulkTagInput = ref('');
 const stagedTagsToAdd = ref<string[]>([]);
 const bulkOrgInput = ref('');
+const mergePrimaryId = ref('');
 
 const allVisibleSelected = computed<boolean>(
   () =>
@@ -138,8 +139,32 @@ watch(
       bulkTagInput.value = '';
       stagedTagsToAdd.value = [];
       bulkOrgInput.value = '';
+      mergePrimaryId.value = '';
     }
   }
+);
+
+watch(
+  () => store.writableSelectedContacts,
+  (list) => {
+    if (list.length === 0) {
+      mergePrimaryId.value = '';
+      return;
+    }
+    if (!list.some((c) => c.id === mergePrimaryId.value)) {
+      const preferred =
+        list.find((c) => Boolean(c.photoDataUrl)) ||
+        list
+          .slice()
+          .sort(
+            (a, b) =>
+              b.emails.length + b.phones.length - (a.emails.length + a.phones.length)
+          )[0] ||
+        list[0];
+      mergePrimaryId.value = preferred.id;
+    }
+  },
+  { immediate: true }
 );
 
 function toggleSidebar() {
@@ -396,6 +421,19 @@ function confirmBulkDelete() {
   );
   if (ok) {
     void store.bulkDeleteContacts();
+  }
+}
+
+async function confirmMergeSelected() {
+  const list = store.writableSelectedContacts;
+  if (list.length < 2) return;
+  const primary = list.find((c) => c.id === mergePrimaryId.value) || list[0];
+  const secondaries = list.filter((c) => c.id !== primary.id);
+  const ok = window.confirm(
+    `Flet ${list.length} valgte kontakter sammen til "${primary.fullName}"?\n\nAlle e-mailadresser, telefonnumre, tags, noter og evt. manglende profilbillede samles på hovedkontakten, og de ${secondaries.length} øvrige dublet(ter) slettes.`
+  );
+  if (ok) {
+    await store.mergeContacts(primary, secondaries);
   }
 }
 
@@ -1127,6 +1165,42 @@ async function handleQuickPhotoChange(e: Event, contact: Contact) {
                 @click="handleBulkSetOrganization(true)"
               >
                 Ryd firma
+              </button>
+            </div>
+          </div>
+
+          <!-- Flet duplikater (Merge kontakter) -->
+          <div
+            v-if="store.writableSelectedContacts.length >= 2"
+            class="p-4 rounded-2xl bg-black/25 border border-white/10 space-y-3 text-xs"
+          >
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Users class="w-3.5 h-3.5 text-blue-400" /> Flet dubletter (Merge kontakter)
+            </div>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              Samler alle e-mailadresser, telefonnumre, tags, noter og profilbillede på én valgt hovedkontakt og sletter de overskydende dubletter.
+            </p>
+            <div class="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <select
+                v-model="mergePrimaryId"
+                class="flex-1 min-w-[180px] px-3 py-2 rounded-xl bg-slate-950/90 border border-slate-700/80 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+              >
+                <option
+                  v-for="c in store.writableSelectedContacts"
+                  :key="c.id"
+                  :value="c.id"
+                >
+                  Hovedkontakt: {{ c.fullName }}{{ c.emails[0]?.value ? ` (${c.emails[0].value})` : c.phones[0]?.value ? ` (${c.phones[0].value})` : '' }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="px-3.5 py-2 rounded-xl dav-theme-btn text-xs font-semibold flex items-center gap-1.5 shadow transition disabled:opacity-45 shrink-0"
+                :disabled="store.isBulkUpdating"
+                @click="confirmMergeSelected"
+              >
+                <Users class="w-3.5 h-3.5" />
+                <span>Flet {{ store.writableSelectedContacts.length }} kontakter til én</span>
               </button>
             </div>
           </div>

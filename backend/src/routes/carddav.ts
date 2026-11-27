@@ -600,3 +600,39 @@ carddavRouter.post('/export', async (req: Request, res: Response) => {
     });
   }
 });
+
+/**
+ * POST /api/carddav/fetch-photo
+ * Henter et eksternt kontaktbillede (f.eks. Gravatar ud fra e-mail eller sikker HTTPS URL) server-side som kompakt data-URL til CardDAV.
+ */
+carddavRouter.post('/fetch-photo', async (req: Request, res: Response) => {
+  try {
+    requireDavCredentials(req);
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const rawUrl = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+
+    let targetUrl = '';
+    if (rawEmail && rawEmail.includes('@')) {
+      const hash = crypto.createHash('sha256').update(rawEmail).digest('hex');
+      targetUrl = `https://www.gravatar.com/avatar/${hash}?s=256&d=404`;
+    } else if (rawUrl) {
+      targetUrl = rawUrl;
+    }
+
+    if (!targetUrl) {
+      res.status(400).json({ ok: false, error: 'Angiv en e-mail eller billede-URL.' });
+      return;
+    }
+
+    const photoDataUrl = await fetchExternalContactPhotoAsDataUrl(targetUrl, 512 * 1024);
+    res.json({
+      ok: true,
+      photoDataUrl: photoDataUrl || null
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke hente profilbillede.'
+    });
+  }
+});

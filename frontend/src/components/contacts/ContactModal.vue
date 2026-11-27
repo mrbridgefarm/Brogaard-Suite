@@ -1,11 +1,24 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { X, Users, Plus, Trash2, Save, Star, Camera, ImagePlus } from 'lucide-vue-next';
+import {
+  X,
+  Users,
+  Plus,
+  Trash2,
+  Save,
+  Star,
+  Camera,
+  ImagePlus,
+  Search,
+  Download,
+  Check
+} from 'lucide-vue-next';
 import { useContactsStore } from '../../stores/contactsStore';
 import { useSuiteStore } from '../../stores/suiteStore';
-import { processContactPhotoFile } from '../../utils/contactPhoto';
+import { apiFetchContactPhoto } from '../../services/carddavApi';
+import { processContactPhotoFile, processContactPhotoDataUrl } from '../../utils/contactPhoto';
 import { getGravatarAvatarUrlForEmail, markGravatarFailed } from '../../utils/gravatar';
-import type { ContactEmail, ContactPhone } from '../../types/contacts';
+import type { Contact, ContactEmail, ContactPhone } from '../../types/contacts';
 
 const store = useContactsStore();
 const suiteStore = useSuiteStore();
@@ -33,8 +46,35 @@ const starred = ref(false);
 const photoDataUrl = ref<string | null | undefined>(undefined);
 const isProcessingPhoto = ref(false);
 const isDraggingPhoto = ref(false);
+const mergeSearchQuery = ref('');
+const isFetchingGravatar = ref(false);
 
 const isExisting = computed(() => Boolean(store.editingContact?.id));
+
+const mergeCandidates = computed<Contact[]>(() => {
+  if (!store.senderContext || isExisting.value) return [];
+  return store.findMatchingWritableContacts(
+    store.senderContext.senderName,
+    mergeSearchQuery.value,
+    5
+  );
+});
+
+const senderEmailImages = computed<string[]>(() => store.senderContext?.emailImages || []);
+
+const canSaveGravatarToCardDav = computed<boolean>(
+  () => !photoDataUrl.value && Boolean(autoGravatarUrl.value)
+);
+
+watch(
+  () => store.isContactModalOpen,
+  (isOpen) => {
+    if (!isOpen) {
+      store.senderContext = null;
+      mergeSearchQuery.value = '';
+    }
+  }
+);
 
 const previewInitials = computed(() => {
   const composed =
@@ -132,6 +172,71 @@ function handlePhotoDrop(e: DragEvent) {
 
 function removePhoto() {
   photoDataUrl.value = null;
+}
+
+function switchToExistingContact(target: Contact) {
+  const ctx = store.senderContext;
+  const senderEmail = ctx?.senderEmail || emails.value.find((e) => e.value.trim())?.value.trim() || '';
+  if (!senderEmail && senderEmailImages.value.length === 0) return;
+  store.openMergeSenderIntoContact(target, {
+    fullName: ctx?.senderName || fullName.value,
+    email: senderEmail,
+    emailImages: senderEmailImages.value
+  });
+}
+
+async function saveGravatarPhotoToCardDav() {
+  const candidateEmail =
+    emails.value.find((e) => Boolean(getGravatarAvatarUrlForEmail(e.value, 160)))?.value.trim() ||
+    '';
+  if (!candidateEmail) return;
+
+  isFetchingGravatar.value = true;
+  try {
+    const fetched = await apiFetchContactPhoto({ email: candidateEmail });
+    if (fetched) {
+      photoDataUrl.value = fetched;
+      suiteStore.notify(
+        'Profilbillede hentet',
+        'Billedet er indlæst i kontakten og gemmes i CardDAV, når du trykker Gem kontakt.',
+        'success'
+      );
+    } else {
+      suiteStore.notify(
+        'Intet offentligt billede fundet',
+        'Kunne ikke hente et billede fra Gravatar for denne e-mailadresse.',
+        'info'
+      );
+    }
+  } catch (err: any) {
+    suiteStore.notify(
+      'Billedhentning fejlede',
+      err?.message || 'Kunne ikke hente profilbillede.',
+      'error'
+    );
+  } finally {
+    isFetchingGravatar.value = false;
+  }
+}
+
+async function useEmailImageAsPhoto(rawDataUrl: string) {
+  isProcessingPhoto.value = true;
+  try {
+    photoDataUrl.value = await processContactPhotoDataUrl(rawDataUrl, 256);
+    suiteStore.notify(
+      'Billede fra e-mail valgt',
+      'Billedet er beskåret og klar til at blive gemt i kontakten.',
+      'success'
+    );
+  } catch (err: any) {
+    suiteStore.notify(
+      'Billedfejl',
+      err?.message || 'Kunne ikke bruge billedet fra e-mailen.',
+      'error'
+    );
+  } finally {
+    isProcessingPhoto.value = false;
+  }
 }
 
 function addEmailRow() {
@@ -258,6 +363,74 @@ async function handleSubmit() {
         </div>
 
         <div class="p-4 space-y-3 overflow-y-auto text-xs flex-1 min-h-0">
+          <!-- Smart flette-hjælper ved oprettelse fra afsender i Mail -->
+          <div
+            v-if="store.senderContext && !isExisting"
+            class="p-3.5 rounded-2xl bg-blue-500/10 border border-blue-400/30 space-y-2.5"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div class="text-xs font-bold text-blue-200">
+                  Tilføj e-mailen til en eksisterende kontakt?
+                </div>
+                <p class="text-[11px] text-slate-300 mt-0.5">
+                  Har du allerede oprettet personen (f.eks. kun med telefonnummer), kan du flette <strong class="text-white">{{ store.senderContext.senderEmail }}</strong> ind på det eksisterende kort.
+                </p>
+              </div>
+            </div>
+
+            <div class="relative flex items-center">
+              <Search class="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
+              <input
+                v-model="mergeSearchQuery"
+                type="text"
+                placeholder="Søg eksisterende kontakt (navn, telefon, firma)..."
+                class="w-full pl-8 pr-3 py-1.5 bg-slate-950/90 border border-slate-700/80 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-400"
+              />
+            </div>
+
+            <div v-if="mergeCandidates.length > 0" class="space-y-1.5 max-h-40 overflow-y-auto">
+              <button
+                v-for="cand in mergeCandidates"
+                :key="cand.id"
+                type="button"
+                class="w-full px-3 py-2 rounded-xl bg-slate-900/90 hover:bg-blue-600/20 border border-slate-700/80 hover:border-blue-400/45 flex items-center justify-between gap-3 text-left transition"
+                @click="switchToExistingContact(cand)"
+              >
+                <div class="min-w-0">
+                  <div class="font-semibold text-slate-100 truncate">{{ cand.fullName }}</div>
+                  <div class="text-[11px] text-slate-400 truncate">
+                    {{
+                      cand.phones[0]?.value ||
+                      cand.emails[0]?.value ||
+                      cand.organization ||
+                      'Ingen telefon eller e-mail endnu'
+                    }}
+                  </div>
+                </div>
+                <span class="px-2.5 py-1 rounded-lg bg-blue-500/20 border border-blue-400/40 text-blue-200 text-[11px] font-semibold shrink-0">
+                  Flet e-mail ind
+                </span>
+              </button>
+            </div>
+            <div v-else class="text-[11px] text-slate-400 italic">
+              Ingen matchende eksisterende kontakter fundet — gem formularen nedenfor for at oprette som ny.
+            </div>
+          </div>
+
+          <div
+            v-else-if="store.senderContext && isExisting"
+            class="p-3 rounded-2xl bg-emerald-500/12 border border-emerald-400/35 text-xs text-emerald-200 flex items-center gap-2"
+          >
+            <Check class="w-4 h-4 text-emerald-300 shrink-0" />
+            <span>
+              Opdaterer eksisterende kontakt —
+              <strong v-if="store.senderContext.senderEmail">{{ store.senderContext.senderEmail }}</strong>
+              {{ store.senderContext.senderEmail ? 'er tilføjet.' : 'klar til foto-opdatering.' }}
+              Tryk <strong>Gem kontakt</strong> for at synkronisere til Mailcow.
+            </span>
+          </div>
+
           <!-- Kontaktbillede & Favorit -->
           <div
             class="p-3.5 rounded-2xl bg-slate-950/80 border transition flex flex-wrap items-center justify-between gap-4"
@@ -325,6 +498,17 @@ async function handleSubmit() {
                       : 'Henter automatisk offentligt profilbillede (hvis tilgængeligt), indtil du vælger eget.'
                   }}
                 </p>
+
+                <button
+                  v-if="canSaveGravatarToCardDav"
+                  type="button"
+                  :disabled="isFetchingGravatar || isProcessingPhoto"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/40 text-blue-200 text-[11px] font-semibold transition disabled:opacity-50"
+                  @click="saveGravatarPhotoToCardDav"
+                >
+                  <Download class="w-3.5 h-3.5" />
+                  <span>{{ isFetchingGravatar ? 'Henter billede...' : 'Gem profilbillede i CardDAV' }}</span>
+                </button>
               </div>
             </div>
 
@@ -344,6 +528,28 @@ async function handleSubmit() {
               />
               <span>{{ starred ? 'Favorit' : 'Markér som favorit' }}</span>
             </button>
+
+            <div
+              v-if="senderEmailImages.length > 0"
+              class="w-full pt-2.5 border-t border-slate-800/80 space-y-1.5"
+            >
+              <div class="text-[11px] text-slate-400">
+                Billeder fra e-mailen (klik for at bruge som kontaktbillede):
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  v-for="(imgUrl, idx) in senderEmailImages"
+                  :key="idx"
+                  type="button"
+                  :disabled="isProcessingPhoto"
+                  class="w-11 h-11 rounded-xl overflow-hidden border border-slate-700 hover:border-blue-400 transition bg-slate-900 shrink-0"
+                  title="Brug dette billede som kontaktbillede"
+                  @click="useEmailImageAsPhoto(imgUrl)"
+                >
+                  <img :src="imgUrl" alt="Billede fra e-mail" class="w-full h-full object-cover" />
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- Adressebog (hvis flere skrivbare) -->

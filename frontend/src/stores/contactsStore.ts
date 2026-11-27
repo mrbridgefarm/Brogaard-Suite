@@ -19,6 +19,12 @@ import {
 export const DEFAULT_CONTACT_CALENDAR_COLOR = '#ec4899';
 const CONTACT_CAL_COLOR_STORAGE_KEY = 'brogaard_contact_calendar_color_v1';
 
+export interface ContactSenderContext {
+  senderName: string;
+  senderEmail: string;
+  emailImages: string[];
+}
+
 function toPlainObject<T>(val: T): T {
   if (val === null || val === undefined) return val;
   return JSON.parse(JSON.stringify(val)) as T;
@@ -45,6 +51,7 @@ export const useContactsStore = defineStore('contacts', () => {
 
   const editingContact = ref<Contact | null>(null);
   const isContactModalOpen = ref<boolean>(false);
+  const senderContext = ref<ContactSenderContext | null>(null);
   const contactCalendarColor = ref<string>(
     localStorage.getItem(CONTACT_CAL_COLOR_STORAGE_KEY) || DEFAULT_CONTACT_CALENDAR_COLOR
   );
@@ -240,7 +247,11 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
-  function openCreateContactModal(prefill?: { fullName?: string; email?: string }) {
+  function openCreateContactModal(prefill?: {
+    fullName?: string;
+    email?: string;
+    emailImages?: string[];
+  }) {
     const book = defaultWritableAddressBook.value;
     if (!book || book.readOnly) {
       suiteStore.notify(
@@ -255,6 +266,15 @@ export const useContactsStore = defineStore('contacts', () => {
     const parts = fullName ? fullName.split(/\s+/) : [];
     const firstName = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0] || '';
     const lastName = parts.length > 1 ? parts[parts.length - 1] : '';
+    const cleanEmail = (prefill?.email || '').trim();
+
+    senderContext.value = cleanEmail
+      ? {
+          senderName: fullName,
+          senderEmail: cleanEmail,
+          emailImages: prefill?.emailImages || []
+        }
+      : null;
 
     editingContact.value = {
       id: '',
@@ -266,8 +286,8 @@ export const useContactsStore = defineStore('contacts', () => {
       nickname: '',
       organization: '',
       title: '',
-      emails: prefill?.email
-        ? [{ type: 'other', value: prefill.email.trim(), pref: true }]
+      emails: cleanEmail
+        ? [{ type: 'other', value: cleanEmail, pref: true }]
         : [{ type: 'home', value: '', pref: true }],
       phones: [{ type: 'mobile', value: '', pref: true }],
       birthday: '',
@@ -284,6 +304,7 @@ export const useContactsStore = defineStore('contacts', () => {
   }
 
   function openEditContactModal(contact: Contact) {
+    senderContext.value = null;
     editingContact.value = toPlainObject({
       ...contact,
       emails: contact.emails.length > 0 ? contact.emails : [{ type: 'home', value: '' }],
@@ -294,6 +315,53 @@ export const useContactsStore = defineStore('contacts', () => {
       categories: contact.categories || [],
       starred: Boolean(contact.starred)
     });
+    isContactModalOpen.value = true;
+  }
+
+  function openMergeSenderIntoContact(
+    contact: Contact,
+    sender: { fullName?: string; email: string; emailImages?: string[] }
+  ) {
+    if (isAddressBookReadOnly(contact.addressBookId)) {
+      suiteStore.notify(
+        'Skrivebeskyttet adressebog',
+        `"${contact.fullName}" ligger i en skrivebeskyttet adressebog og kan ikke ændres.`,
+        'warning'
+      );
+      return;
+    }
+
+    const cleanEmail = sender.email.trim();
+    const cloned = toPlainObject({
+      ...contact,
+      emails: (contact.emails || []).map((e) => ({ ...e })),
+      phones: contact.phones.length > 0 ? contact.phones.map((p) => ({ ...p })) : [{ type: 'mobile', value: '' }],
+      anniversary: contact.anniversary || '',
+      anniversaryLabel: contact.anniversaryLabel || 'Bryllupsdag',
+      address: contact.address || { street: '', city: '', postalCode: '', country: '' },
+      categories: [...(contact.categories || [])],
+      starred: Boolean(contact.starred)
+    });
+
+    if (
+      cleanEmail &&
+      !cloned.emails.some((e) => e.value.trim().toLowerCase() === cleanEmail.toLowerCase())
+    ) {
+      cloned.emails.push({
+        type: cloned.emails.length === 0 ? 'home' : 'other',
+        value: cleanEmail,
+        pref: cloned.emails.length === 0
+      });
+    } else if (cloned.emails.length === 0) {
+      cloned.emails.push({ type: 'home', value: '' });
+    }
+
+    senderContext.value = {
+      senderName: (sender.fullName || contact.fullName || '').trim(),
+      senderEmail: cleanEmail,
+      emailImages: sender.emailImages || []
+    };
+    editingContact.value = cloned;
     isContactModalOpen.value = true;
   }
 
@@ -327,6 +395,7 @@ export const useContactsStore = defineStore('contacts', () => {
       }
       await db.contacts.put(saved).catch(() => {});
       selectedContactId.value = saved.id;
+      senderContext.value = null;
       isContactModalOpen.value = false;
       contactsMutationCounter.value += 1;
 
@@ -499,12 +568,264 @@ export const useContactsStore = defineStore('contacts', () => {
     );
   }
 
-  function hasContactWithEmail(email: string): boolean {
+  function findContactByEmail(email: string): Contact | null {
     const clean = email.trim().toLowerCase();
-    if (!clean) return false;
-    return contacts.value.some((c) =>
-      (c.emails || []).some((e) => e.value.trim().toLowerCase() === clean)
+    if (!clean) return null;
+    return (
+      contacts.value.find((c) =>
+        (c.emails || []).some((e) => e.value.trim().toLowerCase() === clean)
+      ) || null
     );
+  }
+
+  function normalizeMatchText(raw?: string): string {
+    return (raw || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function findBestWritableNameMatch(name: string): Contact | null {
+    const target = normalizeMatchText(name);
+    if (!target || target.length < 2) return null;
+
+    for (const c of contacts.value) {
+      if (isAddressBookReadOnly(c.addressBookId)) continue;
+      const fullNorm = normalizeMatchText(c.fullName);
+      const joinedNorm = normalizeMatchText(`${c.firstName || ''} ${c.lastName || ''}`);
+      if (fullNorm === target || (joinedNorm && joinedNorm === target)) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  function findMatchingWritableContacts(
+    name: string,
+    query?: string,
+    limit = 8
+  ): Contact[] {
+    const q = normalizeMatchText(query);
+    const nameNorm = normalizeMatchText(name);
+    const nameTokens = nameNorm
+      .split(/[\s,._-]+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2);
+
+    const scored: Array<{ contact: Contact; score: number }> = [];
+
+    for (const c of contacts.value) {
+      if (isAddressBookReadOnly(c.addressBookId)) continue;
+
+      const haystack = normalizeMatchText(
+        [
+          c.fullName,
+          c.firstName,
+          c.lastName,
+          c.nickname || '',
+          c.organization || '',
+          ...(c.emails || []).map((e) => e.value),
+          ...(c.phones || []).map((p) => p.value)
+        ].join(' ')
+      );
+
+      if (q) {
+        if (!haystack.includes(q)) continue;
+        let score = 10;
+        if (normalizeMatchText(c.fullName).startsWith(q)) score += 20;
+        if (nameNorm && normalizeMatchText(c.fullName) === nameNorm) score += 50;
+        scored.push({ contact: c, score });
+      } else if (nameNorm || nameTokens.length > 0) {
+        let score = 0;
+        const fullNorm = normalizeMatchText(c.fullName);
+        if (nameNorm && fullNorm === nameNorm) {
+          score += 100;
+        } else if (nameNorm && fullNorm.includes(nameNorm)) {
+          score += 50;
+        }
+        for (const tok of nameTokens) {
+          if (fullNorm.includes(tok)) score += 20;
+          else if (haystack.includes(tok)) score += 10;
+        }
+        if (score > 0) {
+          scored.push({ contact: c, score });
+        }
+      }
+    }
+
+    if (scored.length === 0 && !q) {
+      return contacts.value
+        .filter((c) => !isAddressBookReadOnly(c.addressBookId))
+        .slice()
+        .sort((a, b) => a.fullName.localeCompare(b.fullName, 'da-DK'))
+        .slice(0, limit);
+    }
+
+    return scored
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          a.contact.fullName.localeCompare(b.contact.fullName, 'da-DK')
+      )
+      .slice(0, limit)
+      .map((x) => x.contact);
+  }
+
+  async function mergeContacts(
+    primaryContact: Contact,
+    secondaryContacts: Contact[]
+  ): Promise<Contact | null> {
+    if (isAddressBookReadOnly(primaryContact.addressBookId)) {
+      suiteStore.notify(
+        'Skrivebeskyttet kontakt',
+        'Den valgte hovedkontakt ligger i en skrivebeskyttet adressebog.',
+        'warning'
+      );
+      return null;
+    }
+
+    const secondaries = secondaryContacts.filter(
+      (c) => c.id !== primaryContact.id && !isAddressBookReadOnly(c.addressBookId)
+    );
+    if (secondaries.length === 0) {
+      suiteStore.notify(
+        'Ingen dubletter at flette',
+        'Vælg mindst to skrivbare kontakter for at flette dem.',
+        'warning'
+      );
+      return null;
+    }
+
+    const merged = toPlainObject(primaryContact);
+    const emailSeen = new Set<string>(
+      (merged.emails || []).map((e) => e.value.trim().toLowerCase()).filter(Boolean)
+    );
+    const phoneSeen = new Set<string>(
+      (merged.phones || []).map((p) => p.value.replace(/[\s()-]+/g, '').toLowerCase()).filter(Boolean)
+    );
+    const catSeen = new Set<string>(
+      (merged.categories || []).map((t) => t.trim().toLowerCase()).filter(Boolean)
+    );
+    const noteParts: string[] = [];
+    if (merged.notes?.trim()) noteParts.push(merged.notes.trim());
+
+    for (const sec of secondaries) {
+      for (const em of sec.emails || []) {
+        const cleanVal = em.value.trim();
+        const key = cleanVal.toLowerCase();
+        if (!cleanVal || emailSeen.has(key)) continue;
+        emailSeen.add(key);
+        merged.emails.push({ ...em, value: cleanVal, pref: merged.emails.length === 0 });
+      }
+
+      for (const ph of sec.phones || []) {
+        const cleanVal = ph.value.trim();
+        const key = cleanVal.replace(/[\s()-]+/g, '').toLowerCase();
+        if (!cleanVal || phoneSeen.has(key)) continue;
+        phoneSeen.add(key);
+        merged.phones.push({ ...ph, value: cleanVal, pref: merged.phones.length === 0 });
+      }
+
+      for (const rawCat of sec.categories || []) {
+        const cleanCat = rawCat.trim();
+        const key = cleanCat.toLowerCase();
+        if (!cleanCat || catSeen.has(key)) continue;
+        catSeen.add(key);
+        merged.categories.push(cleanCat);
+      }
+
+      if (sec.notes?.trim()) {
+        const secNote = sec.notes.trim();
+        if (!noteParts.some((n) => n === secNote)) {
+          noteParts.push(secNote);
+        }
+      }
+
+      if (!merged.firstName?.trim() && sec.firstName?.trim()) merged.firstName = sec.firstName.trim();
+      if (!merged.lastName?.trim() && sec.lastName?.trim()) merged.lastName = sec.lastName.trim();
+      if (!merged.nickname?.trim() && sec.nickname?.trim()) merged.nickname = sec.nickname.trim();
+      if (!merged.organization?.trim() && sec.organization?.trim()) merged.organization = sec.organization.trim();
+      if (!merged.title?.trim() && sec.title?.trim()) merged.title = sec.title.trim();
+      if (!merged.birthday?.trim() && sec.birthday?.trim()) merged.birthday = sec.birthday.trim();
+      if (!merged.anniversary?.trim() && sec.anniversary?.trim()) {
+        merged.anniversary = sec.anniversary.trim();
+        merged.anniversaryLabel = sec.anniversaryLabel || merged.anniversaryLabel || 'Bryllupsdag';
+      }
+      if (!merged.website?.trim() && sec.website?.trim()) merged.website = sec.website.trim();
+      if (!merged.photoDataUrl && sec.photoDataUrl) merged.photoDataUrl = sec.photoDataUrl;
+
+      const hasMergedAddr = Boolean(
+        merged.address?.street?.trim() || merged.address?.city?.trim() || merged.address?.postalCode?.trim()
+      );
+      const hasSecAddr = Boolean(
+        sec.address?.street?.trim() || sec.address?.city?.trim() || sec.address?.postalCode?.trim()
+      );
+      if (!hasMergedAddr && hasSecAddr && sec.address) {
+        merged.address = { ...sec.address };
+      }
+
+      if (sec.starred) {
+        merged.starred = true;
+      }
+    }
+
+    merged.notes = noteParts.length > 0 ? noteParts.join('\n\n') : undefined;
+
+    isBulkUpdating.value = true;
+    try {
+      // Gem altid hovedkontakten først — slet aldrig dubletter hvis gem fejler!
+      const savedPrimary = toPlainObject(await apiSaveContact(merged));
+      const pIdx = contacts.value.findIndex((c) => c.id === savedPrimary.id || c.id === primaryContact.id);
+      if (pIdx !== -1) {
+        contacts.value[pIdx] = savedPrimary;
+      } else {
+        contacts.value.push(savedPrimary);
+      }
+      await db.contacts.put(savedPrimary).catch(() => {});
+
+      const delRes = await apiBulkDeleteContacts(
+        secondaries.map((c) => ({
+          id: c.id,
+          vcardUrl: c.vcardUrl,
+          etag: c.etag
+        }))
+      );
+      const removedSet = new Set(
+        delRes.deletedIds.length > 0
+          ? delRes.deletedIds
+          : delRes.failedCount === 0
+            ? secondaries.map((c) => c.id)
+            : []
+      );
+      const removedIds = Array.from(removedSet);
+      if (removedIds.length > 0) {
+        contacts.value = contacts.value.filter((c) => !removedSet.has(c.id));
+        await db.contacts.bulkDelete(removedIds).catch(() => {});
+      }
+
+      selectedContactIds.value = [];
+      selectedContactId.value = savedPrimary.id;
+      selectionAnchorId.value = savedPrimary.id;
+      selectionFocusId.value = savedPrimary.id;
+      contactsMutationCounter.value += 1;
+
+      suiteStore.notify(
+        'Kontakter flettet',
+        `Flettede ${removedIds.length + 1} kontakter sammen til "${savedPrimary.fullName}".`,
+        'success'
+      );
+      return savedPrimary;
+    } catch (err: any) {
+      suiteStore.notify(
+        'Kunne ikke flette kontakter',
+        err?.message || 'Fejl ved fletning på CardDAV-serveren.',
+        'error'
+      );
+      return null;
+    } finally {
+      isBulkUpdating.value = false;
+    }
+  }
+
+  function hasContactWithEmail(email: string): boolean {
+    return Boolean(findContactByEmail(email));
   }
 
   function searchContactsForAutocomplete(
@@ -1003,6 +1324,7 @@ export const useContactsStore = defineStore('contacts', () => {
     selectionAnchorId.value = null;
     selectionFocusId.value = null;
     isBulkUpdating.value = false;
+    senderContext.value = null;
     editingContact.value = null;
     isContactModalOpen.value = false;
   }
@@ -1037,6 +1359,7 @@ export const useContactsStore = defineStore('contacts', () => {
     bulkDeleteContacts,
     editingContact,
     isContactModalOpen,
+    senderContext,
     writableAddressBooks,
     defaultWritableAddressBook,
     allCategories,
@@ -1053,6 +1376,7 @@ export const useContactsStore = defineStore('contacts', () => {
     syncWithServer,
     openCreateContactModal,
     openEditContactModal,
+    openMergeSenderIntoContact,
     saveContact,
     toggleFavorite,
     updateContactPhotoQuick,
@@ -1060,6 +1384,10 @@ export const useContactsStore = defineStore('contacts', () => {
     deleteContact,
     importVcfFile,
     exportContactsVcf,
+    findContactByEmail,
+    findBestWritableNameMatch,
+    findMatchingWritableContacts,
+    mergeContacts,
     hasContactWithEmail,
     searchContactsForAutocomplete,
     resetState

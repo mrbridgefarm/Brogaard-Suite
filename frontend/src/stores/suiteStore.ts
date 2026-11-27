@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { SuiteModule, ToastMessage } from '../types/suite';
 import type { MailDetail, MailHeader } from '../types/mail';
+import type { Contact } from '../types/contacts';
 import {
   apiGetSuiteConfig,
   apiGetSuiteSession,
@@ -292,12 +293,28 @@ export const useSuiteStore = defineStore('suite', () => {
     });
   }
 
-  function saveSenderAsContact(name: string, email: string) {
+  function saveSenderAsContact(name: string, email: string, emailImages?: string[]) {
     if (!enabledModules.value.includes('contacts')) return;
     const contactsStore = useContactsStore();
     contactsStore.openCreateContactModal({
       fullName: name,
-      email
+      email,
+      emailImages
+    });
+  }
+
+  function mergeSenderIntoContact(
+    contact: Contact,
+    name: string,
+    email: string,
+    emailImages?: string[]
+  ) {
+    if (!enabledModules.value.includes('contacts')) return;
+    const contactsStore = useContactsStore();
+    contactsStore.openMergeSenderIntoContact(contact, {
+      fullName: name,
+      email,
+      emailImages
     });
   }
 
@@ -324,6 +341,7 @@ export const useSuiteStore = defineStore('suite', () => {
     composeMailTo,
     composeMailToMany,
     createEventFromMail,
-    saveSenderAsContact
+    saveSenderAsContact,
+    mergeSenderIntoContact
   };
 });
